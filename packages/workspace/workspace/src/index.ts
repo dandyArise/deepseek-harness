@@ -66,8 +66,8 @@ export class WorkspaceActiveSessionError extends Error {
    * @param sessionId - The active session id.
    * @param activity - The reported activity, in listener order.
    */
-  constructor(readonly sessionId: SessionId, readonly activity: readonly SessionActivity[]) {
-    super(`cannot archive session '${sessionId}': the session is active (${activity.map(entry => entry.kind).join(', ')})`)
+  constructor(readonly sessionId: SessionId, readonly activity: readonly SessionActivity[], verb: 'archive' | 'delete' = 'archive') {
+    super(`cannot ${verb} session '${sessionId}': the session is active (${activity.map(entry => entry.kind).join(', ')})`)
     this.name = 'WorkspaceActiveSessionError'
   }
 }
@@ -146,6 +146,8 @@ declare module '@deepseek-ai/cordis' {
      * @mode parallel
      */
     'workspace/session-stop'(request: SessionActivityRequest): Promise<void> | void
+    /** Release an idle live writer before permanently deleting its log. */
+    'workspace/session-deleting'(request: SessionActivityRequest): Promise<void> | void
     /**
      * Admit optional follow-up work after durable archival and any stop requests.
      * Dispatched inside the registry's write queue: a listener registers its work
@@ -405,6 +407,27 @@ export class WorkspaceRegistry extends Service {
       } catch (error) {
         this.ctx.logger.warn('Session archived, but archive follow-up admission failed: %s', error)
       }
+    })
+  }
+
+  /** Delete the durable log, then discard its workspace memberships and cached header. */
+  deleteSession(sessionId: SessionId): Promise<void> {
+    return this.enqueueOperation(async () => {
+      const activity = await this.ctx.waterfall('workspace/session-activity', { sessionId }, () => Promise.resolve([]))
+      if (activity.length) throw new WorkspaceActiveSessionError(sessionId, activity, 'delete')
+      await this.ctx.parallel('workspace/session-deleting', { sessionId })
+      if (this.ctx.get('sessions')?.get(sessionId)) throw new Error('Session is still open by another owner')
+      await this.ctx.sessionPersistence.delete(sessionId)
+      for (const workspace of this.entities.values()) await workspace.detachSession(sessionId)
+      const state = this.requireState()
+      if (state.archivedSessionIds.includes(sessionId) || state.pinnedSessionIds.includes(sessionId)) {
+        await this.setState({ ...state, archivedSessionIds: state.archivedSessionIds.filter(id => id !== sessionId),
+          pinnedSessionIds: state.pinnedSessionIds.filter(id => id !== sessionId) })
+      }
+      this.headers.delete(sessionId)
+      this.sessionPaths.delete(sessionId)
+      this.missingSessionPaths.delete(sessionId)
+      this.invalidSessionPaths.delete(sessionId)
     })
   }
 

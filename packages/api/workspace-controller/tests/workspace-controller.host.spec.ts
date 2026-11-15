@@ -281,6 +281,9 @@ describe('WorkspaceController commands', () => {
       details: { sessionId: session.id, activity },
     })
     expect([...ctx.workspaceRegistry.archivedSessionIds]).toEqual([])
+    await expect(controller.deleteSession({ sessionId: session.id })).rejects.toMatchObject({
+      code: 'workspace/session-active', details: { sessionId: session.id, activity },
+    })
     // Asking to stop the work archives the still-active Session and reaches
     // the stop providers first.
     const stops: string[] = []

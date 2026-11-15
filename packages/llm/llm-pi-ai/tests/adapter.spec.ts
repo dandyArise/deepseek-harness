@@ -114,6 +114,32 @@ beforeEach(() => {
 })
 
 describe('PiAiAdapter provider routing', () => {
+  it('uses the reloaded Devstral window for the continuation completion budget', async () => {
+    const model = 'devstral-small'
+    const nativeModels = (contextLength: number) => ({ body: JSON.stringify({ models: [{
+      key: model, type: 'llm', loaded_instances: [{ id: model, config: { context_length: contextLength } }],
+    }] }) })
+    const server = await mockServer([
+      nativeModels(8192), { events: textEvents }, nativeModels(32768), { events: textEvents },
+    ])
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    ctx.llm.registerAdapter(['lmstudio'], adapterOf({ lmstudio: {
+      baseURL: server.url + '/v1', api: 'openai-completions',
+      models: [{ id: model, contextWindow: 8192, maxTokens: 4096,
+        lmStudio: { source: '/api/v1/models', loadedContext: 8192 } }],
+    } }))
+    const history = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'context '.repeat(6000) }] })
+    const resume = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Continue.' }] })
+    await assemble(ctx, { provider: 'lmstudio', model, messages: [history] })
+    await assemble(ctx, { provider: 'lmstudio', model, messages: [history, resume] })
+    expect(server.paths).toEqual([
+      '/api/v1/models', '/v1/chat/completions', '/api/v1/models', '/v1/chat/completions',
+    ])
+    expect(server.requests[1]).toMatchObject({ max_completion_tokens: 1 })
+    expect(server.requests[3]).toMatchObject({ max_completion_tokens: 4096 })
+  })
+
   it('resolves a catalog model dynamically and uses a private endpoint', async () => {
     const server = await mockServer([{ events: textEvents }])
     const ctx = await harness(server.url)
@@ -753,6 +779,25 @@ describe('provider profile lifecycle', () => {
       failure: { code: 'UNSUPPORTED_REASONING_EFFORT' },
     })
     expect(server.requests).toHaveLength(1)
+  })
+
+  it('sends the selected imported LM Studio effort on the chat completions wire', async () => {
+    vi.stubEnv('PI_TEST_KEY', 'test-key')
+    const server = await mockServer([{ body: JSON.stringify({ models: [{ type: 'llm', key: 'sample' }] }) }, { events: textEvents }])
+    const ctx = new Context()
+    try {
+      await ctx.plugin(LlmRuntime)
+      await ctx.plugin(LlmPiAi, { providers: { local: {
+        apiKeyEnv: 'PI_TEST_KEY', api: 'openai-completions', baseURL: server.url,
+        models: [{ id: 'sample', lmStudio: { source: '/api/v1/models', effortLevels: ['low', 'high'] } }],
+      } } })
+      const info = await ctx.llm.resolveModelInfo('local', 'sample')
+      expect(info.reasoning?.efforts.map(level => level.id)).toEqual(['low', 'high'])
+      await assemble(ctx, { provider: 'local', model: 'sample', messages: [], reasoningEffort: brandString<ReasoningEffortId>('low') })
+      expect(server.requests.at(-1)).toMatchObject({ reasoning_effort: 'low' })
+    } finally {
+      await ctx.fiber.dispose()
+    }
   })
 
   it('dispatches the compat-switched dialect on a declared route', async () => {

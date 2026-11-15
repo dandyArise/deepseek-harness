@@ -28,6 +28,7 @@ import type { ModelsOperations } from './operations.ts'
 import type { DeepSeekModelDraft } from './DeepSeekModelsEditor.tsx'
 import type { en } from './locales.ts'
 import { ModelRow } from './ModelRow.tsx'
+import { refreshModel } from './refresh-model.ts'
 import { useModelRows } from './useModelRows.ts'
 import type { CapacityField } from './useModelRows.ts'
 import styles from './ModelsSection.module.css'
@@ -143,9 +144,10 @@ function adopt(candidate: LlmDiscoveredModel): ModelDraft {
   return {
     id: candidate.id,
     ...candidate.name === undefined ? {} : { name: candidate.name },
-    ...candidate.contextWindow === undefined ? {} : { contextWindow: candidate.contextWindow },
+    ...candidate.lmStudio === undefined ? {} : { lmStudio: candidate.lmStudio },
+    ...candidate.lmStudio !== undefined || candidate.contextWindow === undefined ? {} : { contextWindow: candidate.contextWindow },
     ...candidate.maxTokens === undefined ? {} : { maxTokens: candidate.maxTokens },
-    ...candidate.inputModalities === undefined ? {} : { input: [...candidate.inputModalities] },
+    ...candidate.lmStudio !== undefined || candidate.inputModalities === undefined ? {} : { input: [...candidate.inputModalities] },
   }
 }
 
@@ -256,7 +258,7 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
     () => new TextSearchIndex(candidates ?? [], candidate => ({ fuzzy: [candidate.id, candidate.name] })),
     [candidates],
   )
-  const listed = new Set(activeCandidates.map(candidate => candidate.id))
+  const listed = new Map(activeCandidates.map(candidate => [candidate.id, candidate]))
   // An unchecked candidate leaves the list. A row the listing does not name,
   // including a half-typed row without an id, is outside the picker and stays.
   const removedRows = new Set<number>()
@@ -275,7 +277,8 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
   const emptiesList = models.length > 0 && keptRows.length === 0 && addedRows.length === 0
 
   const adoptPicked = (): void => {
-    onChange([...keptRows, ...addedRows])
+    const refreshed = keptRows.map(model => refreshModel(model, listed.get(textOf(model, 'id'))))
+    onChange([...refreshed, ...addedRows])
     rowState.forget(removedRows)
     closePicker()
   }

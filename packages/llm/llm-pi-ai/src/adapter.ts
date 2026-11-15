@@ -29,6 +29,7 @@
 import type {
   Api,
   AuthContext,
+  Context as PiContext,
   CredentialStore,
   Model,
   Models,
@@ -60,11 +61,37 @@ import { brandString } from '@deepseek-ai/dsh-brand'
 import { idleWatchdog, timeoutOf } from '@deepseek-ai/dsh-timeout'
 import type { ResolvedPiAiProviderProfile } from './config.ts'
 import { requestImageTarget, toPiContext } from './context.ts'
+import { readLmStudioModels } from './discovery.ts'
 import { conversationUpdates, createModels, getSupportedThinkingLevels } from './models.ts'
 import { toStreamChunks } from './stream.ts'
 import { bindThinkingToPrefix } from './prefix-binding.ts'
 import type { PrefixDigests } from './prefix-binding.ts'
 import type { PiAiRequestHeaderContext } from './types.ts'
+
+/** Devstral's chat template requires one user message per uninterrupted user turn. */
+function devstralTurns(messages: PiContext['messages']): PiContext['messages'] {
+  const turns: PiContext['messages'] = []
+  for (const message of messages) {
+    const previous = turns.at(-1)
+    if (message.role !== 'user' || previous?.role !== 'user') {
+      turns.push(message)
+      continue
+    }
+    const left = previous.content
+    const right = message.content
+    turns[turns.length - 1] = {
+      ...previous,
+      content: typeof left === 'string' && typeof right === 'string'
+        ? left + '\n\n' + right
+        : [
+          ...typeof left === 'string' ? [{ type: 'text' as const, text: left }] : left,
+          { type: 'text', text: '\n\n' },
+          ...typeof right === 'string' ? [{ type: 'text' as const, text: right }] : right,
+        ],
+    }
+  }
+  return turns
+}
 
 /**
  * Initially active declaration added to an Anthropic request whose projected
@@ -353,12 +380,16 @@ export class PiAiAdapter extends LlmAdapter {
         if (error instanceof LlmError && error.code === 'MISSING_CREDENTIAL') return []
         throw error
       }
-      return snapshot.models.getModels(provider).map(model => ({
-        provider,
-        id: model.id,
-        name: model.name,
-        inputModalities: [...model.input],
-      }))
+      return snapshot.models.getModels(provider).map((model) => {
+        const lmStudio = profile.lmStudioModels?.get(model.id)
+        return {
+          provider,
+          ...lmStudio === undefined ? {} : { lmStudio, protocol: model.api },
+          id: model.id,
+          name: model.name,
+          inputModalities: [...model.input],
+        }
+      })
     })
   }
 
@@ -380,7 +411,10 @@ export class PiAiAdapter extends LlmAdapter {
     // Only a cap the deployment configured is a request default; the
     // catalog's `maxTokens` sizes the model and stops there.
     const configuredMaxTokens = profile.configuredMaxTokens.get(model)
+    const lmStudio = profile.lmStudioModels?.get(model)
     return {
+      protocol: resolvedModel.api,
+      ...lmStudio === undefined ? {} : { lmStudio },
       provider,
       id: model,
       name: resolvedModel.name,
@@ -392,12 +426,22 @@ export class PiAiAdapter extends LlmAdapter {
     }
   }
 
-  override prepareCall(provider: string, model: string, _signal?: AbortSignal): Promise<PreparedAdapterCall> {
+  override async prepareCall(provider: string, model: string, signal?: AbortSignal): Promise<PreparedAdapterCall> {
     const snapshot = this.current()
-    return Promise.resolve({
-      model: this.modelInfo(snapshot, provider, model),
-      stream: options => this.streamWithSnapshot(options, snapshot),
-    })
+    const info = this.modelInfo(snapshot, provider, model)
+    const profile = this.profileOf(snapshot, provider)
+    if (info.lmStudio?.source === '/api/v1/models' && profile.baseURL) {
+      const headers = new Headers(profile.headers)
+      const apiKey = await this.config.resolveApiKey(provider, profile)
+      if (apiKey !== undefined) headers.set('Authorization', `Bearer ${apiKey}`)
+      const url = profile.baseURL.replace(/\/+$/, '') + '/models'
+      const live = (await readLmStudioModels(url, headers, [{ id: model }], signal))?.[0]
+      if (live?.contextWindow !== undefined) info.context = { contextWindow: live.contextWindow }
+    }
+    return {
+      model: info,
+      stream: options => this.streamWithSnapshot(options, snapshot, info.context?.contextWindow),
+    }
   }
 
   stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
@@ -407,6 +451,7 @@ export class PiAiAdapter extends LlmAdapter {
   private async * streamWithSnapshot(
     options: GenerateOptions,
     snapshot: PiAiSnapshot,
+    contextWindow?: number,
   ): AsyncIterable<StreamChunk> {
     if (options.stop !== undefined) {
       throw new LlmError('llm-pi-ai does not support GenerateOptions.stop', 'UNSUPPORTED_OPTION')
@@ -417,7 +462,10 @@ export class PiAiAdapter extends LlmAdapter {
     // mid-request builds a separate snapshot, so this request finishes under
     // the one it started with and the next call picks up the new one.
     const profile = this.profileOf(snapshot, options.provider)
-    const model = this.modelOf(snapshot, options.provider, options.model)
+    const catalogModel = this.modelOf(snapshot, options.provider, options.model)
+    const model = contextWindow !== undefined && contextWindow !== catalogModel.contextWindow
+      ? { ...catalogModel, contextWindow }
+      : catalogModel
     const updates = conversationUpdates(model)
     // pi-ai collapses Anthropic tool updates without an initially active declaration.
     const tools = options.tools ?? []
@@ -467,6 +515,9 @@ export class PiAiAdapter extends LlmAdapter {
             maxBytes: profile.requestImageMaxBytes,
           },
         }, onReplayDegrade, updates.systemPromptUpdate === 'in-history', prefixDigests)
+      if (model.api === 'openai-completions' && /devstral/i.test(model.id)) {
+        converted.messages = devstralTurns(converted.messages)
+      }
       const manualThinking = model.reasoning && reasoning !== undefined && reasoning !== 'off'
         && (model as Model<'anthropic-messages'>).compat?.forceAdaptiveThinking !== true
       const { context, digest } = bindThinkingToPrefix(converted, model.api, prefixDigests, manualThinking, (count) => {
@@ -480,7 +531,8 @@ export class PiAiAdapter extends LlmAdapter {
         signal: watchdog.signal,
         headers: requestHeaders(profile.headers, options, model.baseUrl, this.config.prepareHeaders),
       })
-      const iterator = toStreamChunks(events, model.contextWindow, options.signal, model.id, digest)[Symbol.asyncIterator]()
+      const chunks = toStreamChunks(events, contextWindow ?? model.contextWindow, options.signal, model.id, digest)
+      const iterator = chunks[Symbol.asyncIterator]()
       let exhausted = false
       try {
         while (true) {

@@ -113,6 +113,11 @@ export class TestWorkspaces implements IWorkspaces {
     await (this.stubs.get('delete')?.(workspaceId) as Promise<void> | undefined)
   }
 
+  async deleteSession(sessionId: SessionId): Promise<void> {
+    this.calls.push({ method: 'deleteSession', args: [sessionId] })
+    await this.stubs.get('deleteSession')?.(sessionId)
+  }
+
   /**
    * Move a Workspace in display order (recorded; default no-op).
    * @param workspaceId - Workspace to move.

@@ -42,6 +42,8 @@ export async function buildModelCatalog(
         return {
           id: model.id,
           name: model.name,
+          ...(resolved.lmStudio === undefined ? {} : { lmStudio: resolved.lmStudio }),
+          ...(resolved.protocol === undefined ? {} : { protocol: resolved.protocol }),
           ...(model.description === undefined ? {} : { description: model.description }),
           ...(reasoning === undefined ? {} : { reasoning }),
           ...(model.badge === undefined ? {} : { badge: model.badge }),

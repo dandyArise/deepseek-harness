@@ -19,6 +19,7 @@ import type {
   WorkspaceCreateRequest,
   WorkspaceCreateValue,
   WorkspaceDeleteRequest,
+  WorkspaceDeleteSessionRequest,
   WorkspaceDeleteValue,
   WorkspaceInsertBeforeRequest,
   WorkspaceInsertSessionBeforeRequest,
@@ -150,6 +151,19 @@ export class WorkspaceCommands {
       )
     }
     return { workspace: workspaceView(workspace) }
+  }
+
+  async deleteSession(request: WorkspaceDeleteSessionRequest): Promise<WorkspaceDeleteValue> {
+    try {
+      await this.ctx.workspaceRegistry.deleteSession(request.sessionId)
+    } catch (error) {
+      if (error instanceof WorkspaceActiveSessionError) {
+        throw new RemoteError('workspace/session-active', error.message,
+          { sessionId: request.sessionId, activity: error.activity }, { cause: error })
+      }
+      throw new RemoteError('gateway/bad-request', errorMessage(error), {}, { cause: error })
+    }
+    return { deleted: true }
   }
 
   /**

@@ -70,6 +70,7 @@ import { catalogProvider, catalogProviderIds } from './catalog.ts'
 import { assertServiceable, Config, resolveProfiles } from './config.ts'
 import type { ResolvedPiAiProviderProfile } from './config.ts'
 import { discoverModels } from './discovery.ts'
+import { verifyToolRoundTrip } from './verify-model.ts'
 import type { StoredModelDiscoveryProfile } from './discovery.ts'
 import { registerPiAiFlows } from './login.ts'
 import { providerDefaultsOf } from './provider-data.ts'
@@ -304,7 +305,21 @@ export function apply(ctx: Context, config: Config): void {
   ctx.llm.registerModelDiscovery(settingsNs, (request, signal) => discoverModels(
     { ...request, ...signal === undefined ? {} : { signal } },
     () => storedDiscoveryProfile(request.provider),
-  ))
+  ), async (provider, model, protocol, signal) => {
+    const settings = ctx.get('settings')
+    const section = settings?.describe().find(item => item.ns === settingsNs)
+    const profile = (section?.value as import('./config.ts').Options | undefined)?.providers?.[provider]
+    const index = profile?.models?.findIndex(row => row.id === model) ?? -1
+    if (!settings || !section || !profile?.models?.[index]?.lmStudio || profile.api !== protocol) {
+      return { status: 'blocked', cause: 'Save the imported model and its protocol before verification.' }
+    }
+    const result = await verifyToolRoundTrip(ctx, provider, model, protocol, signal)
+    signal.throwIfAborted()
+    await settings.mutate(settingsNs, [{
+      op: 'set', path: ['providers', provider, 'models', String(index), 'lmStudio', 'verification', protocol], value: result,
+    }], section.revision)
+    return result
+  })
   // Route effects bind to this apply fiber via the stable `ctx` reference,
   // even when a swap runs inside the scoped settings callback below. A bare
   // mount (zero routes) is the dormant posture: nothing registers until a

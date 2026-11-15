@@ -5,13 +5,15 @@ import type { WorkspaceId, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-
 import type { WorkspaceActionRequest, WorkspaceBrowserProps } from '../contract/slots.ts'
 import css from './WorkspaceBrowser.module.css'
 
-type Props = Pick<WorkspaceBrowserProps, 'renameWorkspace' | 'deleteWorkspace' | 'settleWorkspaceAction' | 't'> & {
+type Props = Pick<WorkspaceBrowserProps, 'renameWorkspace' | 'deleteWorkspace' | 'deleteSession' | 'settleWorkspaceAction' | 't'> & {
   request: WorkspaceActionRequest
   workspaces: readonly WorkspaceView[]
 }
 
 /** @param props - captured request, current Workspace list, and existing mutations. @returns the active dialog. */
-export function WorkspaceDialogs({ request, workspaces, renameWorkspace, deleteWorkspace, settleWorkspaceAction, t }: Props) {
+export function WorkspaceDialogs({
+  request, workspaces, renameWorkspace, deleteWorkspace, deleteSession, settleWorkspaceAction, t,
+}: Props) {
   const composingRef = useRef(false)
   const renameTarget = request.action === 'rename' ? request : null
   const [renameDraft, setRenameDraft] = useState(request.displayTitle)
@@ -43,7 +45,8 @@ export function WorkspaceDialogs({ request, workspaces, renameWorkspace, deleteW
     })
   }
 
-  const deleteTarget = request.action === 'delete' ? request : null
+  const deleteTarget = request.action === 'rename' ? null : request
+  const deleteLabel = t(request.action === 'deleteSession' ? 'delete.session' : 'delete.workspace')
   const [deleting, setDeleting] = useState(false)
   const [deleteCommittedId, setDeleteCommittedId] = useState<WorkspaceId | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -65,7 +68,14 @@ export function WorkspaceDialogs({ request, workspaces, renameWorkspace, deleteW
     setDeleting(true)
     setDeleteCommittedId(null)
     setDeleteError(null)
-    deleteWorkspace(deleteTarget.workspaceId).then(() => {
+    const operation = deleteTarget.action === 'deleteSession'
+      ? deleteSession(deleteTarget.sessionId)
+      : deleteWorkspace(deleteTarget.workspaceId)
+    operation.then(() => {
+      if (deleteTarget.action === 'deleteSession') {
+        settleWorkspaceAction()
+        return
+      }
       // Keep the confirmation pending until this component has rendered the
       // committed list projection without the deleted id. Closing earlier
       // exposes one stale React frame to the next Create Workspace gesture.
@@ -116,25 +126,25 @@ export function WorkspaceDialogs({ request, workspaces, renameWorkspace, deleteW
       open={deleteTarget !== null}
       onClose={closeDelete}
       closeLabel={t('close')}
-      title={t('delete.workspace')}
+      title={deleteLabel}
       {...deleteTarget === null
         ? {}
-        : { description: t('delete.desc', { name: deleteTarget.displayTitle }) }}
+        : { description: t(deleteTarget.action === 'deleteSession' ? 'delete.sessionDesc' : 'delete.desc', { name: deleteTarget.displayTitle }) }}
       footer={(
         <>
-          <Button variant="outline" disabled={deleting} onClick={closeDelete}>{t('cancel')}</Button>
+          <Button variant="outline" data-modal-autofocus disabled={deleting} onClick={closeDelete}>{t('cancel')}</Button>
           <Button
             variant="outline"
             className={css.deleteAction}
             disabled={deleting}
             onClick={confirmDelete}
           >
-            {t('delete.workspace')}
+            {deleteLabel}
           </Button>
         </>
       )}
     >
-      {deleting && <div className={css.deleteStatus} role="status">{t('delete.pending')}</div>}
+      {deleting && <div className={css.deleteStatus} role="status">{t(request.action === 'deleteSession' ? 'delete.sessionPending' : 'delete.pending')}</div>}
       {deleteError !== null && <div className={css.renameError} role="alert">{deleteError}</div>}
     </Modal>
   </>

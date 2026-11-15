@@ -20,7 +20,7 @@ import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type { CredentialRef } from '@deepseek-ai/dsh-credentials'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import { resolveRetryPolicy, RetryPolicySchema } from '@deepseek-ai/dsh-llm'
-import type { ResolvedRetryPolicy, RetryPolicyConfig } from '@deepseek-ai/dsh-llm'
+import type { LmStudioModelMetadata, ResolvedRetryPolicy, RetryPolicyConfig } from '@deepseek-ai/dsh-llm'
 import { deepEqualJson } from '@deepseek-ai/dsh-util-values'
 import {
   CACHE_CONTROL_FORMATS,
@@ -239,6 +239,7 @@ export interface ResolvedPiAiProviderProfile
   catalogError?: string
   /** Per-model failures reported before attempting a request. */
   modelErrors: ReadonlyMap<string, string>
+  lmStudioModels?: ReadonlyMap<string, LmStudioModelMetadata>
   /**
    * Per-request output caps this profile explicitly configured, by model id.
    * The seam materializes one only into a request that names no cap of its
@@ -328,8 +329,24 @@ const reasoningEfforts = z.dict(
   z.union(THINKING_LEVELS),
 ) as unknown as z<PiAiReasoningEfforts>
 
+const capabilityFields = {
+  text: z.boolean(), vision: z.boolean(), tools: z.boolean(), reasoning: z.boolean(), effort: z.boolean(),
+}
+
 /** The fields a `models` entry and a `modelOverrides` value share; only the id's home differs. */
 const modelFields = {
+  lmStudio: z.object({
+    source: z.string(),
+    effortLevels: z.array(z.string()),
+    ...capabilityFields,
+    maxContext: z.number().step(1).min(1),
+    loadedContext: z.number().step(1).min(1),
+    overrides: z.object(capabilityFields),
+    verification: z.dict(z.object({
+      status: z.union(['verified', 'failed', 'blocked'] as const).required(),
+      cause: z.string(),
+    })),
+  }),
   name: z.string(),
   contextWindow: z.number().step(1).min(1),
   maxTokens: z.number().step(1).min(1),
@@ -542,6 +559,8 @@ export function resolveProfiles(
       ...rest.headers === undefined ? {} : { headers: { ...rest.headers } },
       ...rest.thinkingBudgets === undefined ? {} : { thinkingBudgets: { ...rest.thinkingBudgets } },
       configuredMaxTokens: catalog?.configuredMaxTokens ?? new Map(),
+      lmStudioModels: new Map((source.models ?? []).flatMap(model =>
+        model.lmStudio?.source ? [[model.id, model.lmStudio] as const] : [])),
       modelErrors: catalog?.modelErrors ?? new Map(),
       ...piProvider === undefined ? {} : { piProvider },
       ...catalogError === undefined ? {} : { catalogError },

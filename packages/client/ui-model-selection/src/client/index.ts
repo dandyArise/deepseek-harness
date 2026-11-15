@@ -179,9 +179,18 @@ export function apply(ctx: ClientContext): void {
       inject: (sessionId): ModelSelectInjected => {
         const directory = models.directoryFor(sessionId)
         const available = sessions.subagentAddress(sessionId) === undefined
+        const llm = scope.get('remote.llm') as typeof scope.remote.llm | undefined
         return {
           available,
           directory: directory.store,
+          ...!available || llm === undefined ? {} : {
+            verifyModel: async (provider, model, protocol) => {
+              const response = await llm.verifyModel(provider, model, protocol)
+              if (!response.ok) return { status: 'blocked', cause: response.error.message }
+              await directory.load(true).catch(() => { /* the directory exposes the catalog error independently */ })
+              return response.value
+            },
+          },
           load: () => {
             if (available) directory.load().catch(() => { /* surfaced on the store */ })
           },

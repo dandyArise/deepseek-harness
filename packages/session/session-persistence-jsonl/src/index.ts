@@ -586,6 +586,46 @@ class JsonlSessionPersistence extends SessionPersistence {
     return snapshots
   }
 
+  protected override async deleteStoredLog(id: SessionId): Promise<SessionHeader | undefined> {
+    await this.ensureRootEncoding()
+    this.tracker.claimWrite(id)
+    try {
+      const selected = await this.findLog(id)
+      if (!selected) return
+      const dir = dirname(selected.sourcePath)
+      const target = await this.stat(id)
+      if (!target) throw new Error('Session changed during deletion.')
+      const expectedDir = sessionDir(await realpath(this.root), target.header.cwd, id)
+      if (await realpath(dir) !== expectedDir) throw new Error('Refusing to delete a redirected session directory.')
+      const lease = await this.acquireLease(id, undefined, dir)
+      try {
+        const sessions = await this.list()
+        const current = sessions.find(row => row.header.id === id)
+        if (current?.revision !== target.revision) throw new Error('Session changed during deletion.')
+        if (sessions.some(row => row.header.parentSession === id)) {
+          throw new Error('This session still has dependent sessions.')
+        }
+        // Keep the newest generation readable until all predecessors are gone. A
+        // retry after an I/O failure cannot accidentally resurrect an old log.
+        const names = await readdir(dir)
+        for (const name of names) {
+          const path = join(dir, name)
+          if (path !== selected.sourcePath && parseGenerationLogFilename(name, this.compression) !== undefined) {
+            await rm(path)
+          }
+        }
+        await rm(selected.sourcePath)
+        this.coldLogMemo.delete(id)
+        this.listedHeaders.delete(selected.sourcePath)
+        return target.header
+      } finally {
+        await lease.release()
+      }
+    } finally {
+      this.tracker.releaseClaim(id)
+    }
+  }
+
   // --- handle-facing storage internals (package-private via the handle class below) ---
 
   /** Resolve and read one stored log, refusing loudly when the artifact is absent. */

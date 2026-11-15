@@ -376,6 +376,33 @@ runLiveWritePathContract('jsonl', LIVE_WRITE_BATCH_MAX_DELAY_MS, async () => {
   return { ctx: await mount(), remount: mount }
 })
 
+it('erases only the selected session generations after its writer and dependent sessions are gone', async () => {
+  const dir = await freshRoot()
+  const ctx = new Context()
+  liveContexts.push(ctx)
+  await ctx.plugin(JsonlSessionPersistence, { root: dir, compression: 'none' })
+  const persistence = ctx.sessionPersistence
+  const target = meta('erase')
+  const sibling = meta('keep')
+  const child = { ...meta('child'), parentSession: target.id }
+  await writeLog(persistence, target, oneTurnLog())
+  await writeLog(persistence, sibling, oneTurnLog())
+  const writer = await persistence.open(target.id, 'write')
+  await expect(persistence.delete(target.id)).rejects.toMatchObject({ name: 'SessionAlreadyOwnedError' })
+  await writer.close()
+  await writeLog(persistence, child, oneTurnLog())
+  await expect(persistence.delete(target.id)).rejects.toThrow('dependent sessions')
+  await persistence.delete(child.id)
+  const obsolete = generationLogPath(dir, target.cwd, target.id, 1, 'none')
+  await writeFile(obsolete, 'old generation')
+  await persistence.delete(target.id)
+  await persistence.delete(target.id)
+  await expect(stat(obsolete)).rejects.toMatchObject({ code: 'ENOENT' })
+  await expect(persistence.open(target.id, 'read')).rejects.toMatchObject({ name: 'SessionPersistenceNotFoundError' })
+  expect((await persistence.list()).map(row => row.header.id)).toEqual([sibling.id])
+  expect((await readAll(persistence, sibling.id)).events).toEqual(oneTurnLog())
+})
+
 describe('JsonlSessionPersistence: format helpers', () => {
   it('names and parses only canonical immutable generations', () => {
     expect(generationLogFilename(0, 'none')).toBe('session.jsonl')

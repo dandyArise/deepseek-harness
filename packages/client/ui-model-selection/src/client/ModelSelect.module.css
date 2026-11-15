@@ -178,6 +178,22 @@
   margin: 2px 0 3px;
 }
 
+.capabilityFilters, .capabilities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+}
+
+.capabilityFilters {
+  padding: 4px 7px;
+}
+
+.capabilities {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 0.75rem;
+  text-align: start;
+}
+
 .searchRow .search {
   display: flex;
   height: auto;

@@ -111,6 +111,11 @@ export interface WorkspaceInsertSessionBeforeRequest {
   readonly beforeSessionId?: SessionId
 }
 
+/** Permanently delete the specified Session and its stored history. */
+export interface WorkspaceDeleteSessionRequest {
+  readonly sessionId: SessionId
+}
+
 /** Session requested for archival from Workspace grouping surfaces. */
 export interface WorkspaceArchiveSessionRequest {
   readonly sessionId: SessionId

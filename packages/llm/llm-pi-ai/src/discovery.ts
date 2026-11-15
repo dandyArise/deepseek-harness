@@ -103,6 +103,62 @@ function capacity(...candidates: readonly unknown[]): number | undefined {
   return undefined
 }
 
+/** Join native facts to the ids the configured inference protocol actually advertises. */
+function nativeLmStudioListing(body: unknown, advertised: LlmDiscoveredModel[]): LlmDiscoveredModel[] | undefined {
+  const native = (body as { models?: unknown } | null)?.models
+  if (!Array.isArray(native)) return undefined
+  const byId = new Map<string, LlmDiscoveredModel>()
+  const nonChat = new Set<string>()
+  for (const raw of native as unknown[]) {
+    const row = raw as {
+      key?: unknown
+      type?: unknown
+      display_name?: unknown
+      max_context_length?: unknown
+      capabilities?: { vision?: unknown; trained_for_tool_use?: unknown; reasoning?: { allowed_options?: unknown } }
+      loaded_instances?: ({ id?: unknown; config?: { context_length?: unknown } } | null)[]
+    } | null
+    const key = label(row?.key)
+    if (!row || key === undefined) continue
+    if (row.type !== 'llm') {
+      if (row.type === 'embedding' || row.type === 'decision') nonChat.add(key)
+      continue
+    }
+    const caps = row.capabilities
+    const options = caps?.reasoning?.allowed_options
+    const settings: unknown[] = Array.isArray(options) ? options : []
+    const gradedLevels = ['low', 'medium', 'high', 'xhigh', 'minimal', 'max']
+    const levels = settings.filter((value): value is string => typeof value === 'string' && gradedLevels.includes(value))
+    const knownOptions = settings.length > 0 && settings.every(value =>
+      typeof value === 'string' && (value === 'on' || value === 'off' || gradedLevels.includes(value)))
+    const maxContext = capacity(row.max_context_length)
+    const instances = Array.isArray(row.loaded_instances) ? row.loaded_instances : []
+    const ids = new Set([key, ...instances.flatMap(instance => typeof instance?.id === 'string' ? [instance.id] : [])])
+    for (const id of ids) {
+      const instance = instances.find(value => value?.id === id)
+      const loadedContext = capacity(instance?.config?.context_length)
+      const contextWindow = loadedContext ?? maxContext
+      byId.set(id, {
+        id, name: label(row.display_name) ?? id,
+        ...contextWindow === undefined ? {} : { contextWindow },
+        ...typeof caps?.vision !== 'boolean' ? {} : { inputModalities: caps.vision ? ['text', 'image'] : ['text'] },
+        lmStudio: {
+          source: '/api/v1/models', text: true,
+          ...typeof caps?.vision !== 'boolean' ? {} : { vision: caps.vision },
+          ...typeof caps?.trained_for_tool_use !== 'boolean' ? {} : { tools: caps.trained_for_tool_use },
+          // A switch for thinking (on/off) is not a choice of intensity. Neither
+          // setting declares a separate reasoning channel on the inference wire.
+          ...!knownOptions ? {} : { effort: new Set(levels).size > 1 },
+          ...!knownOptions || levels.length === 0 ? {} : { effortLevels: [...new Set(levels)] },
+          ...maxContext === undefined ? {} : { maxContext },
+          ...loadedContext === undefined ? {} : { loadedContext },
+        },
+      })
+    }
+  }
+  return advertised.filter(model => !nonChat.has(model.id)).map(model => byId.get(model.id) ?? model)
+}
+
 /** A non-empty string field of a listing entry, or `undefined`. */
 function label(...candidates: readonly unknown[]): string | undefined {
   for (const candidate of candidates) {
@@ -367,8 +423,8 @@ export async function discoverModels(
   const supplied = request.apiKey ?? await stored?.resolveApiKey()
   const apiKey = supplied === undefined ? undefined : usableProbeKey(supplied)
   let response: Response
+  const headers = new Headers(stored?.headers === undefined ? undefined : Object.entries(stored.headers))
   try {
-    const headers = new Headers(stored?.headers === undefined ? undefined : Object.entries(stored.headers))
     headers.set('accept', 'application/json')
     if (api === 'anthropic-messages') {
       headers.set('anthropic-version', ANTHROPIC_VERSION)
@@ -414,5 +470,37 @@ export async function discoverModels(
   } catch (error: unknown) {
     throw new LlmError(`${url} did not answer with JSON`, 'DISCOVERY_FAILED', { cause: error })
   }
-  return api === 'google-generative-ai' ? readGeminiListing(body) : readListing(body)
+  if (api === 'google-generative-ai') return readGeminiListing(body)
+  const models = readListing(body)
+  const rows = (body as { data?: unknown } | null)?.data
+  const localSignature = Array.isArray(rows) && rows.some((row: unknown) =>
+    typeof row === 'object' && row !== null && 'owned_by' in row && row.owned_by === 'organization_owner')
+  if (!localSignature && !/^lm[-_ ]?studio$/i.test(request.provider ?? '')) return models
+  const enriched = await readLmStudioModels(url, headers, models, request.signal) ?? models
+  return enriched.map(model => model.lmStudio ? model : { ...model, lmStudio: { source: new URL(url).pathname } })
+}
+
+/** Native read-only metadata for the advertised ids; never contacts an inference endpoint. */
+export async function readLmStudioModels(
+  url: string, headers: Headers, models: LlmDiscoveredModel[], signal?: AbortSignal,
+): Promise<LlmDiscoveredModel[] | undefined> {
+  const nativeUrl = new URL(url)
+  nativeUrl.pathname = nativeUrl.pathname.replace(/(?:\/v1)?\/models$/, '/api/v1/models')
+  nativeUrl.search = ''
+  try {
+    const native = await fetch(nativeUrl, {
+      headers, redirect: 'error',
+      signal: AbortSignal.any([AbortSignal.timeout(5_000), ...signal === undefined ? [] : [signal]]),
+    })
+    if (native.ok) {
+      const result = nativeLmStudioListing(JSON.parse(await readBounded(native, nativeUrl.href)), models)
+      if (result !== undefined) return result
+    } else {
+      await native.body?.cancel()
+    }
+  } catch (error) {
+    if (signal?.aborted) throw new LlmError('model discovery aborted by caller', 'ABORTED', { cause: error })
+    // The OpenAI listing remains usable if the optional native catalog is unavailable.
+  }
+  return undefined
 }

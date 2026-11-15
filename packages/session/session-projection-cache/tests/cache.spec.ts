@@ -232,6 +232,18 @@ afterEach(async () => {
 })
 
 describe('SessionProjectionCache write policy', () => {
+  it('removes a deleted session checkpoint and discards late writes from its lifecycle', async () => {
+    const { ctx, root } = await harness()
+    const id = brandString<SessionId>('erase')
+    const created = whenWritten(ctx, id)
+    const session = ctx.sessions.create(id)
+    await created
+    await ctx.parallel('session/deleted', id, session.header)
+    await ctx.sessionProjectionCache.write(session)
+    await expect(readFile(recordPath(root, id))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(ctx.sessionProjectionCache.cachedSnapshot(session.header)).toBeUndefined()
+  })
+
   it('writes a durable checkpoint at turn/end (mandatory point)', async () => {
     const { ctx, root } = await harness()
     // The interval cannot substitute for the mandatory turn/end trigger.

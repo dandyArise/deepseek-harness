@@ -115,6 +115,58 @@ describe('catalog-route model discovery', () => {
 })
 
 describe('draft-provider model discovery', () => {
+  it('joins native LM Studio facts to served ids without loading models', async () => {
+    const rows = ['opaque', 'alias', 'other', 'embed'].map(id => ({ id, owned_by: 'organization_owner' }))
+    const native = { models: [
+      { key: 'opaque', type: 'llm', max_context_length: 100000,
+        loaded_instances: [{ id: 'opaque', config: { context_length: 8192 } }, { id: 'alias', config: { context_length: 4096 } }],
+        capabilities: { vision: false, trained_for_tool_use: true, reasoning: { allowed_options: ['on', 'off'] } } },
+      { key: 'other', type: 'llm', loaded_instances: [], max_context_length: 32768,
+        capabilities: { vision: true, reasoning: { allowed_options: ['low', 'high'] } } },
+      { key: 'embed', type: 'embedding' },
+    ] }
+    const fetch = vi.fn().mockResolvedValueOnce(Response.json({ data: rows })).mockResolvedValueOnce(Response.json(native))
+    vi.stubGlobal('fetch', fetch)
+    const ctx = await harness()
+    const models = await ctx.llm.discoverModels('llm-pi-ai', { baseURL: 'http://localhost:1234/v1' })
+    expect(fetch.mock.calls.map(([url]) => String(url))).toEqual(['http://localhost:1234/v1/models', 'http://localhost:1234/api/v1/models'])
+    expect(models.map(model => model.id)).toEqual(['opaque', 'alias', 'other'])
+    expect(models[0]?.lmStudio).toEqual({ source: '/api/v1/models', text: true, vision: false, tools: true, effort: false,
+      maxContext: 100000, loadedContext: 8192 })
+    expect(models[1]?.contextWindow).toBe(4096)
+    expect(models[2]?.lmStudio).toEqual({ source: '/api/v1/models', text: true, vision: true, effort: true, effortLevels: ['low', 'high'], maxContext: 32768 })
+  })
+
+  it('keeps bare ids and unknowns when the native LM Studio listing is unavailable', async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(Response.json({ data: [{ id: 'vision-by-name', owned_by: 'organization_owner' }] }))
+      .mockResolvedValueOnce(new Response(null, { status: 404 }))
+    vi.stubGlobal('fetch', fetch)
+    expect(await discoverModels({ baseURL: 'http://localhost:1234/v1' })).toEqual([
+      { id: 'vision-by-name', name: 'vision-by-name', lmStudio: { source: '/v1/models' } },
+    ])
+  })
+
+  it('refreshes the selected instance context at call preparation and retains configured unknown modalities', async () => {
+    const ctx = new Context()
+    try {
+      await ctx.plugin(LlmRuntime)
+      await ctx.plugin(LlmPiAi, { providers: { local: {
+        api: 'openai-completions', baseURL: 'http://localhost:1234/v1',
+        models: [{ id: 'm', input: ['text', 'image'], lmStudio: { source: '/api/v1/models', maxContext: 100000, loadedContext: 8192 } }],
+      } } })
+      const fetch = vi.fn().mockResolvedValueOnce(Response.json({ models: [
+        { type: 'llm', key: 'm', max_context_length: 100000, loaded_instances: [{ id: 'm', config: { context_length: 4096 } }] },
+      ] }))
+      vi.stubGlobal('fetch', fetch)
+      const selected = await ctx.llm.prepareCall({ provider: 'local', model: 'm' })
+      expect(selected.context?.contextWindow).toBe(4096)
+      expect(selected.inputModalities).toEqual(['text', 'image'])
+      expect(fetch).toHaveBeenCalledTimes(1)
+      expect(String(fetch.mock.calls[0]?.[0])).toBe('http://localhost:1234/api/v1/models')
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
   it('reads an OpenAI-compatible listing and keeps the capacities it discloses', async () => {
     const server = await listingServer({
       body: JSON.stringify({

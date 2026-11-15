@@ -1,7 +1,7 @@
 /** Session commands whose activation policy is explicit at each Remote method. */
 
 import type { ProjectionHandle } from '@deepseek-ai/dsh-session-projection'
-import { continuationProjectionDefinition, type ContinuationState } from './continuation.ts'
+import { continuationProjectionDefinition, continuationPrompt, type ContinuationState } from './continuation.ts'
 
 import { modelAvailable } from './catalog.ts'
 import { randomUUID } from 'node:crypto'
@@ -325,11 +325,15 @@ export class SessionCommandController {
       try {
         return await agent.runMaintenance(() => {
           const inbox = agent.inbox
-          if (request.mode !== 'queue' || this.continuation.stateOf(agent.session).ending === null
+          const continuation = this.continuation.stateOf(agent.session)
+          if (request.mode !== 'queue' || continuation.ending === null
             || inbox.nextTurn.length > 0 || inbox.nextStep.some(message => message.source.kind === 'user')) {
             throw new RemoteError('session/agent-busy', 'generation continuation is unavailable', { reason: 'NO_CONTINUABLE_FAILURE_OR_PENDING_INPUT' })
           }
-          agent.followup(createUserMessage({ content: [], source }))
+          agent.followup(createUserMessage({
+            content: continuation.truncated ? [{ type: 'text', text: continuationPrompt }] : [],
+            source,
+          }))
           return Promise.resolve({ accepted: true as const })
         })
       } catch (error: unknown) {

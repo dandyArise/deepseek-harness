@@ -8,6 +8,8 @@ import {
 import type { DeepSeekModelDraft } from './DeepSeekModelsEditor.tsx'
 import type { ModelsKey } from './locales.ts'
 import { ModelInputTypes } from './ModelInputTypes.tsx'
+import { LmStudioCapabilitiesEditor } from './LmStudioCapabilitiesEditor.tsx'
+import type { LlmDiscoveredModel } from '@deepseek-ai/dsh-api-remotes/client'
 import { ModelReasoningEfforts } from './ModelReasoningEfforts.tsx'
 import type { ModelRowOrder } from './useModelRows.ts'
 import styles from './ModelsSection.module.css'
@@ -57,6 +59,7 @@ function rowHalf(event: DragEvent<HTMLElement>): 'before' | 'after' {
  */
 export function ModelRow(props: ModelRowProps): ReactNode {
   const { model, position, t, disabled } = props
+  const metadata = model.lmStudio as LlmDiscoveredModel['lmStudio']
   const preview = useRowDragPreview(styles['modelDragPreview'] as string)
   const modelField = (field: 'id' | 'name') => (
     <label className={`${styles['modelField']} ${field === 'name' ? styles['modelName'] : ''}`}>
@@ -169,10 +172,13 @@ export function ModelRow(props: ModelRowProps): ReactNode {
                   />
                 </label>
               ))}
-              <ModelInputTypes
+              {metadata !== undefined ? (
+                <LmStudioCapabilitiesEditor metadata={metadata} t={t} disabled={disabled}
+                  onChange={(lmStudio) => { props.onChange({ ...model, lmStudio }) }} />
+              ) : <ModelInputTypes
                 model={model} field={props.inputField} position={position}
                 fallback={props.inputFallback} disabled={disabled || props.inputLoading === true} t={t} onChange={props.onChange}
-              />
+              />}
               {props.reasoningLevels !== undefined && props.reasoningLevels.length > 0
                 ? (
                   <ModelReasoningEfforts

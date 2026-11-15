@@ -83,6 +83,32 @@ beforeEach(() => {
 
 afterEach(cleanup)
 
+it('filters by effective vision and tools verified on the active protocol and reports a blocked check', async () => {
+  const protocol = 'openai-completions'
+  const lmStudio = { source: '/api/v1/models', vision: true, verification: { [protocol]: { status: 'verified' as const } } }
+  const directory = createSnapshotStore(state({
+    current: { provider: 'local', model: 'a' },
+    groups: [{ id: 'local', name: 'Local', models: [
+      { id: 'a', name: 'Alfa', lmStudio, protocol },
+      { id: 'b', name: 'Beta', lmStudio: { ...lmStudio, overrides: { vision: false } }, protocol },
+      { id: 'c', name: 'Gamma', lmStudio, protocol: 'openai-responses' },
+    ] }],
+  }))
+  const verifyModel = vi.fn(async () => ({ status: 'blocked' as const, cause: 'Jinja template error' }))
+  render(<ModelSelect renderSlot={renderLabel} locked={false} available directory={directory} load={vi.fn()}
+    resolveText={resolveText} select={vi.fn()} t={t} verifyModel={verifyModel} />)
+  fireEvent.click(screen.getByRole('button'))
+  fireEvent.click(screen.getByRole('menuitem', { name: zh.verifyModel }))
+  expect(await screen.findByText(zh.blocked + ' · Jinja template error')).toBeTruthy()
+  expect(verifyModel).toHaveBeenCalledWith('local', 'a', protocol)
+  fireEvent.click(screen.getByRole('menuitem', { name: /Alfa/ }))
+  fireEvent.click(screen.getByRole('checkbox', { name: zh.vision }))
+  expect(screen.getAllByRole('menuitemradio')).toHaveLength(2)
+  fireEvent.click(screen.getByRole('checkbox', { name: zh.verifiedTools }))
+  expect(screen.getAllByRole('menuitemradio')).toHaveLength(1)
+  expect(screen.getByRole('menuitemradio').textContent).toContain('Alfa')
+})
+
 describe('ModelSelect label slot', () => {
   it('distinguishes identical model names and ids by provider across all placements and restores labels on unload', async () => {
     const runtime = await SlotTestRuntime.create()

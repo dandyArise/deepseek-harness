@@ -35,6 +35,10 @@ Choose this adapter when the same composition serves several providers, when a r
 
 ### Configure provider routes
 
+For LM Studio, **Fetch available models** joins the inference catalog to the native model metadata. In the model selector, **Vision** uses the effective vision capability and **Verified tools** requires a successful round trip for the selected protocol. The model editor shows the source and keeps per-capability overrides across imports. Missing declarations appear as unknown. The native reasoning options can describe effort settings without establishing a separate reasoning channel.
+
+**Verify this model** runs inference on the selected model. Harness supplies a random tracking number only after receiving a structured tool call and checks for that number in the final answer. A protocol or template error records a blocked verdict with the cause. Catalog synchronization only reads metadata. Context budgeting uses the loaded instance length when available and falls back to the advertised maximum for an unloaded model.
+
 Each profile may set a `retryPolicy`; omission uses normal mode with five retries. `apiKeyEnv` is a credential reference resolved per request through the harness credential seam, so no secret enters the configuration file; a reference that resolves to nothing fails the request with `MISSING_CREDENTIAL`. Omitting it leaves the route configured-but-keyless, which for an installed catalog route defers to pi-ai's provider-native ambient discovery.
 
 ```yaml

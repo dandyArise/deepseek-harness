@@ -116,6 +116,33 @@ const pairs: { a: Api; b: Api | 'deepseek-messages' }[] = [
 ]
 
 describe('protocol history round trips', () => {
+  it('sends Devstral one user turn for adjacent context and preserves tool replay', async () => {
+    const api = 'openai-completions'
+    const model = 'mistralai/devstral-small'
+    const server = await mockServer([{ events: frames(api, true) }, { events: frames(api) }])
+    vi.stubEnv('DEVSTRAL_TEST_KEY', 'test-key')
+    const ctx = new Context()
+    contexts.push(ctx)
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(LlmPiAi, { providers: {
+      local: { api, baseURL: server.url, apiKeyEnv: 'DEVSTRAL_TEST_KEY', models: [{ id: model }] },
+    } })
+    const texts = ['workspace', 'instructions', 'skills', 'runtime', 'Réponds OK']
+    const messages: Message[] = texts.map(text => createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text }] }))
+    const request = { provider: 'local', model, system: 'system prompt', messages, tools: [tool] }
+    const reply = await assemble(ctx, request)
+    expect(wireHistory(server.requests[0], api)).toEqual([
+      { role: 'system', content: 'system prompt' },
+      { role: 'user', content: texts.join('\n\n') },
+    ])
+    const calls = reply.message.content.filter(block => block.type === 'tool-call')
+    messages.push(reply.message, ...calls.map(call => createToolResultMessage({
+      callId: call.id, content: [{ type: 'text', text: call.name }], isError: false,
+    })))
+    await assemble(ctx, request)
+    expectToolPairs(server.requests[1], api)
+  })
+
   it.each(pairs)('$a → $b → $a preserves saved content and restores native replay', async ({ a, b }) => {
     vi.stubEnv('PROTOCOL_ROUNDTRIP_KEY', 'test-key')
     const source = await mockServer([{ events: frames(a, true) }, { events: frames(a) }, { events: frames(a) }])

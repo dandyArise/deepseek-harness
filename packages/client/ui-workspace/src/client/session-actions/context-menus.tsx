@@ -12,7 +12,10 @@ import type {
 
 type Actions = Omit<PinSessionInjected & ArchiveSessionInjected, 'hooks'>
   & ForkSessionInjected & RenameSessionInjected & SessionIdInjected
-  & { readonly markSession: (sessionId: SessionId, unread: boolean) => void }
+  & {
+    readonly markSession: (sessionId: SessionId, unread: boolean) => void
+    readonly requestSessionDelete: (sessionId: SessionId, displayTitle: string) => void
+  }
 
 /**
  * Register built-in actions while retaining the legacy Slot for external components.
@@ -83,4 +86,8 @@ export function registerSessionMenus(ctx: Context, actions: Actions): void {
       run: () => { (restoring ? actions.unarchiveSession : actions.archiveSession)(target.sessionId) },
     }]
   })
+  register('delete', 700, ['workspace/deleteSession'], target => allowed(target, 'workspace/deleteSession') ? [{
+    id: 'delete', label: t('delete.session'), icon: { key: 'workspace.delete' }, danger: true, afterContent: true,
+    run: () => { actions.requestSessionDelete(target.sessionId, target.displayTitle) },
+  }] : [])
 }

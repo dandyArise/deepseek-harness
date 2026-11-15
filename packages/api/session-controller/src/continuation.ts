@@ -8,6 +8,7 @@ import { z } from 'zod'
 // Explicit manual requests use a fixed product policy, independent of automatic retry configuration.
 const CONTINUABLE_FAILURES: ReadonlySet<string> = new Set([
   'RATE_LIMIT', 'SERVER', 'TIMEOUT', 'TRANSPORT', 'EMPTY_RESPONSE', 'STREAM_CLOSED',
+  'CONTEXT_WINDOW_EXCEEDED',
 ])
 
 const endingSchema = z.number().int().nonnegative().transform(brandNumber<SessionSeq>).nullable()
@@ -15,17 +16,20 @@ const stateSchema = z.object({
   admitted: z.boolean(),
   failedAttempt: z.boolean(),
   ending: endingSchema,
+  truncated: z.literal(true).optional(),
 })
 
 /** Recoverable manual-continuation facts over admitted user input and empty retry messages. */
 export type ContinuationState = z.infer<typeof stateSchema>
+
+export const continuationPrompt = 'Continue the previous response in its original language from where it stopped.'
 
 const EMPTY: ContinuationState = { admitted: false, failedAttempt: false, ending: null }
 
 /** Eligibility requires admitted human work and a failed settlement in the last request step. */
 export const continuationProjectionDefinition = {
   key: 'conversationContinuation',
-  stateVersion: 4,
+  stateVersion: 5,
   stateSchema,
   init: (): ContinuationState => EMPTY,
   apply: (state, event) => {
@@ -38,11 +42,16 @@ export const continuationProjectionDefinition = {
       case 'user/message':
         return !state.admitted && event.surfaceOp === 'append'
           && ((event.data.source.kind === 'user' && event.data.content.length > 0)
-            || (event.data.source.kind === 'retry' && event.data.content.length === 0))
+            || (event.data.source.kind === 'retry' && (event.data.content.length === 0
+              || (event.data.content.length === 1 && event.data.content[0]?.type === 'text'
+                && event.data.content[0].text === continuationPrompt))))
           ? { ...state, admitted: true } : state
       case 'assistant/attempt':
         return state.failedAttempt ? state : { ...state, failedAttempt: true }
       case 'turn/end': {
+        if (event.data.reason.kind === 'max-tokens' && state.admitted) {
+          return { ...EMPTY, ending: event.seq, truncated: true }
+        }
         const ending = event.data.reason.kind === 'error' && CONTINUABLE_FAILURES.has(event.data.reason.error.code)
           && state.admitted && state.failedAttempt ? event.seq : null
         return ending === null ? EMPTY : { ...EMPTY, ending }

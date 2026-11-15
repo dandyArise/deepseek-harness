@@ -22,6 +22,7 @@ import type {
   LlmResolvedModelInfo,
   LlmProviderInfo,
   ModelModality,
+  ModelVerificationResult,
   StreamChunk,
   SystemPromptUpdate,
   ToolSchema,
@@ -47,6 +48,8 @@ export * from './brand.ts'
 export * from './error.ts'
 export * from './api-key.ts'
 export type * from './types.ts'
+
+type ModelVerifier = (provider: string, model: string, protocol: string, signal: AbortSignal) => Promise<ModelVerificationResult>
 export * from './content.ts'
 export * from './assistant-stream.ts'
 export * from './message.ts'
@@ -369,6 +372,7 @@ export interface DirectoryRegistrationHandle {
 export class LlmRuntime extends TypertRemoteService {
   private adapters = new Map<string, AdapterRegistration>()
   private directory = new Map<string, LlmConfigurableProvider>()
+  private verifiers = new Map<string, ModelVerifier>()
   private discoveries = new Map<
     string,
     (request: LlmModelDiscoveryRequest, signal?: AbortSignal) => Promise<readonly LlmDiscoveredModel[]>
@@ -579,6 +583,7 @@ export class LlmRuntime extends TypertRemoteService {
    * Disposed with the fiber.
    * @param settingsNs - the namespace whose profiles this discovery serves.
    * @param discover - interrogates one endpoint and must honor the supplied signal.
+   * @param verify - optional owner of model-specific tool verification and verdict storage.
    * @returns the disposer that withdraws the offer.
    */
   registerModelDiscovery(
@@ -587,6 +592,7 @@ export class LlmRuntime extends TypertRemoteService {
       request: LlmModelDiscoveryRequest,
       signal?: AbortSignal,
     ) => Promise<readonly LlmDiscoveredModel[]>,
+    verify?: ModelVerifier,
   ): () => void {
     const dispose = this.ctx.effect(function* (this: LlmRuntime) {
       if (settingsNs.length === 0) {
@@ -596,7 +602,9 @@ export class LlmRuntime extends TypertRemoteService {
         throw new LlmError(`model discovery for "${settingsNs}" is already registered`, 'DUPLICATE_DISCOVERY')
       }
       this.discoveries.set(settingsNs, discover)
+      if (verify) this.verifiers.set(settingsNs, verify)
       yield () => {
+        this.verifiers.delete(settingsNs)
         this.discoveries.delete(settingsNs)
       }
     }.bind(this), 'llm.registerModelDiscovery()')
@@ -637,6 +645,7 @@ export class LlmRuntime extends TypertRemoteService {
       seen.add(model.id)
       models.push({
         id: model.id,
+        ...model.lmStudio === undefined ? {} : { lmStudio: structuredClone(model.lmStudio) },
         ...model.name === undefined ? {} : { name: model.name },
         ...model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow },
         ...model.maxTokens === undefined ? {} : { maxTokens: model.maxTokens },
@@ -673,6 +682,22 @@ export class LlmRuntime extends TypertRemoteService {
         { cause: error },
       )
     }
+  }
+
+  /**
+   * Run the selected route's tool probe and persist its protocol-specific result.
+   * @param provider - configured route owning the model.
+   * @param model - selected inference model identifier.
+   * @param protocol - wire protocol currently shown by the selector.
+   * @param signal - cancellation supplied by the Remote carrier.
+   * @returns the structured tool verdict and a diagnostic when unsuccessful.
+   */
+  @Remote
+  async verifyModel(provider: string, model: string, protocol: string, signal: AbortSignal): Promise<ModelVerificationResult> {
+    const entry = this.directory.get(provider)
+    const verify = entry && this.verifiers.get(entry.settingsNs)
+    if (!verify) return { status: 'blocked', cause: 'Model verification is unavailable for this provider.' }
+    return verify(provider, model, protocol, signal)
   }
 
   /**
@@ -754,6 +779,8 @@ export class LlmRuntime extends TypertRemoteService {
         provider: model.provider,
         id: model.id,
         name: model.name,
+        ...model.protocol === undefined ? {} : { protocol: model.protocol },
+        ...model.lmStudio === undefined ? {} : { lmStudio: structuredClone(model.lmStudio) },
         ...model.description === undefined ? {} : { description: model.description },
         ...inputModalities === undefined ? {} : { inputModalities },
         ...badge === undefined ? {} : {
@@ -848,6 +875,8 @@ export class LlmRuntime extends TypertRemoteService {
       provider,
       id: model,
       name: resolved.name,
+      ...resolved.protocol === undefined ? {} : { protocol: resolved.protocol },
+      ...resolved.lmStudio === undefined ? {} : { lmStudio: structuredClone(resolved.lmStudio) },
       ...resolved.description === undefined ? {} : { description: resolved.description },
       ...inputModalities === undefined ? {} : { inputModalities },
       ...context === undefined ? {} : { context: { contextWindow: context.contextWindow } },
