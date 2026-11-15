@@ -198,7 +198,7 @@ class FakeWorkspaces implements IWorkspaces {
   declare readonly create: IWorkspaces['create']
   declare readonly rename: IWorkspaces['rename']
   declare readonly delete: IWorkspaces['delete']
-  declare readonly deleteSession: IWorkspaces['deleteSession']
+  readonly deleteSession = vi.fn<IWorkspaces['deleteSession']>(async () => {})
   declare readonly insertBefore: IWorkspaces['insertBefore']
   declare readonly insertSessionBefore: IWorkspaces['insertSessionBefore']
   readonly pinCalls: SessionId[] = []
@@ -1513,6 +1513,20 @@ describe('UiWorkspaceService', () => {
 
     expect(b.sessions.retained[0]!.release).toHaveBeenCalledOnce()
     expect(b.selectPanel).toHaveBeenCalledTimes(2)
+  })
+
+  it('releases the displayed history only after successful deletion of that session', async () => {
+    const b = bench()
+    const current = sid('current')
+    b.uiWorkspace.openSession(current)
+    const reference = b.sessions.retained[0]!
+    await b.uiWorkspace.deleteSession(sid('other'))
+    b.workspaces.deleteSession.mockRejectedValueOnce(new Error('busy'))
+    await expect(b.uiWorkspace.deleteSession(current)).rejects.toThrow('busy')
+    expect(reference.release).not.toHaveBeenCalled()
+    await b.uiWorkspace.deleteSession(current)
+    expect(reference.release).toHaveBeenCalledOnce()
+    expect(b.selectPanel).toHaveBeenLastCalledWith(null)
   })
 
   it('forwards archive commands and preserves failures', async () => {
