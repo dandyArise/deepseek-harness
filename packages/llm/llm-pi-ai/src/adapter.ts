@@ -62,6 +62,9 @@ import { idleWatchdog, timeoutOf } from '@deepseek-ai/dsh-timeout'
 import type { ResolvedPiAiProviderProfile } from './config.ts'
 import { requestImageTarget, toPiContext } from './context.ts'
 import { readLmStudioModels } from './discovery.ts'
+import { fetchLmStudioStream } from './lm-studio-fetch.ts'
+import { markDevstralRequests, mergeDevstralUsers } from './devstral-payload.ts'
+import { estimateLmStudioPrompt, lmStudioOverflow, resizeLmStudioContext, waitForLmStudioResize } from './lm-studio-context.ts'
 import { conversationUpdates, createModels, getSupportedThinkingLevels } from './models.ts'
 import { toStreamChunks } from './stream.ts'
 import { bindThinkingToPrefix } from './prefix-binding.ts'
@@ -71,8 +74,15 @@ import type { PiAiRequestHeaderContext } from './types.ts'
 /** Devstral's chat template requires one user message per uninterrupted user turn. */
 function devstralTurns(messages: PiContext['messages']): PiContext['messages'] {
   const turns: PiContext['messages'] = []
+  let toolCaller: Extract<PiContext['messages'][number], { role: 'assistant' }> | undefined
   for (const message of messages) {
     const previous = turns.at(-1)
+    // The template skips assistant tool calls and tool results in its role check.
+    // Close that exchange before a new instruction, keeping the reminder after the results.
+    if (message.role === 'user' && previous?.role === 'toolResult' && toolCaller) {
+      turns.push({ ...toolCaller, content: [{ type: 'text', text: 'Tool results received.' }], stopReason: 'stop' })
+    }
+    if (message.role === 'assistant') toolCaller = message
     if (message.role !== 'user' || previous?.role !== 'user') {
       turns.push(message)
       continue
@@ -396,12 +406,9 @@ export class PiAiAdapter extends LlmAdapter {
   override resolveModel(
     provider: string,
     model: string,
-    _signal?: AbortSignal,
+    signal?: AbortSignal,
   ): Promise<LlmResolvedModelInfo> {
-    return Promise.resolve().then(() => {
-      const snapshot = this.current()
-      return this.modelInfo(snapshot, provider, model)
-    })
+    return this.liveModelInfo(this.current(), provider, model, signal)
   }
 
   private modelInfo(snapshot: PiAiSnapshot, provider: string, model: string): LlmResolvedModelInfo {
@@ -426,26 +433,98 @@ export class PiAiAdapter extends LlmAdapter {
     }
   }
 
-  override async prepareCall(provider: string, model: string, signal?: AbortSignal): Promise<PreparedAdapterCall> {
-    const snapshot = this.current()
+  private async liveModelInfo(
+    snapshot: PiAiSnapshot, provider: string, model: string, signal?: AbortSignal,
+  ): Promise<LlmResolvedModelInfo> {
     const info = this.modelInfo(snapshot, provider, model)
     const profile = this.profileOf(snapshot, provider)
     if (info.lmStudio?.source === '/api/v1/models' && profile.baseURL) {
+      await waitForLmStudioResize(profile.baseURL, model)
       const headers = new Headers(profile.headers)
       const apiKey = await this.config.resolveApiKey(provider, profile)
       if (apiKey !== undefined) headers.set('Authorization', `Bearer ${apiKey}`)
       const url = profile.baseURL.replace(/\/+$/, '') + '/models'
       const live = (await readLmStudioModels(url, headers, [{ id: model }], signal))?.[0]
-      if (live?.contextWindow !== undefined) info.context = { contextWindow: live.contextWindow }
+      if (live?.lmStudio && live.contextWindow !== undefined) {
+        const { loadedContext: _previous, ...metadata } = info.lmStudio
+        return {
+          ...info,
+          lmStudio: { ...metadata, ...live.lmStudio.loadedContext === undefined ? {} : { loadedContext: live.lmStudio.loadedContext },
+            ...live.lmStudio.maxContext === undefined ? {} : { maxContext: live.lmStudio.maxContext } },
+          context: { contextWindow: live.contextWindow },
+        }
+      }
     }
+    return info
+  }
+
+  override async prepareCall(provider: string, model: string, signal?: AbortSignal): Promise<PreparedAdapterCall> {
+    const snapshot = this.current()
+    const info = await this.liveModelInfo(snapshot, provider, model, signal)
     return {
       model: info,
-      stream: options => this.streamWithSnapshot(options, snapshot, info.context?.contextWindow),
+      stream: options => this.streamPrepared(options, snapshot, info),
     }
   }
 
   stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     return this.streamWithSnapshot(options, this.current())
+  }
+
+  private async * streamPrepared(options: GenerateOptions, snapshot: PiAiSnapshot, info: LlmResolvedModelInfo): AsyncIterable<StreamChunk> {
+    const capacity = info.lmStudio
+    const url = this.profileOf(snapshot, options.provider).baseURL
+    let window = info.context?.contextWindow
+    if (!url || !capacity?.loadedContext || !capacity.maxContext || !window || info.protocol !== 'openai-completions') {
+      yield* this.streamWithSnapshot(options, snapshot, window)
+      return
+    }
+    // maxTokens is a ceiling, sometimes the entire theoretical model window.
+    // Keep the ceiling on the request; reserve a practical response allowance for sizing.
+    const reserve = Math.min(options.maxTokens ?? 2048, 4096)
+    const estimated = estimateLmStudioPrompt(options) + reserve
+    const maxContext = capacity.maxContext
+    let preflightUnavailable = false
+    const enlarge = async (needed: number) => {
+      try { return await resizeLmStudioContext(url, options.model, needed, maxContext, options.signal) }
+      catch (error) {
+        options.signal?.throwIfAborted()
+        if (error instanceof Error && error.message.startsWith('LM Studio ')) {
+          throw new LlmError(error.message, 'CONTEXT_WINDOW_EXCEEDED', { cause: error })
+        }
+        return undefined // Optional local CLI unavailable: keep normal provider/compaction handling.
+      }
+    }
+    if (estimated > window && estimated <= capacity.maxContext) {
+      const enlarged = await enlarge(estimated)
+      if (enlarged !== undefined) window = enlarged
+      else preflightUnavailable = true
+    }
+    await waitForLmStudioResize(url, options.model)
+    let emittedContent = false
+    let initialUsage: Extract<StreamChunk, { type: 'usage' }> | undefined
+    for await (const chunk of this.streamWithSnapshot(options, snapshot, window)) {
+      if (!emittedContent && chunk.type === 'usage') {
+        initialUsage = chunk
+        continue
+      }
+      if (!preflightUnavailable && !emittedContent && chunk.type === 'finish' && chunk.reason.kind === 'error') {
+        const overflow = lmStudioOverflow(chunk.reason.failure.message)
+        if (overflow && overflow.prompt + reserve > window) {
+          const actual = await enlarge(overflow.prompt + reserve)
+          if (actual !== undefined && actual > window) {
+            yield* this.streamWithSnapshot(options, snapshot, actual)
+            return
+          }
+        }
+      }
+      if (initialUsage) {
+        yield initialUsage
+        initialUsage = undefined
+      }
+      if (chunk.type !== 'usage' && chunk.type !== 'finish') emittedContent = true
+      yield chunk
+    }
   }
 
   private async * streamWithSnapshot(
@@ -475,7 +554,9 @@ export class PiAiAdapter extends LlmAdapter {
         && message.content.some(block => block.type === 'tool-addition' || block.type === 'tool-removal'))
     const request = needsPlaceholder
       ? { ...options, tools: [ANTHROPIC_TOOL_UPDATE_PLACEHOLDER, ...tools] }
-      : options
+      : model.api === 'openai-completions' && /devstral/i.test(model.id)
+        ? { ...options, messages: markDevstralRequests(options.messages) }
+        : options
     const reasoning = resolveReasoningLevel(
       model,
       options.reasoningEffort ?? profile.reasoning,
@@ -525,6 +606,10 @@ export class PiAiAdapter extends LlmAdapter {
       })
       const events = snapshot.models.streamSimple(model, context, {
         ...profileOptions(profile, reasoning, apiKey),
+        ...(model.api === 'openai-completions' && /devstral/i.test(model.id) && { onPayload: mergeDevstralUsers }),
+        ...(model.api === 'openai-completions' && profile.lmStudioModels?.has(model.id) && {
+          fetch: fetchLmStudioStream,
+        }),
         ...options.temperature === undefined ? {} : { temperature: options.temperature },
         ...options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens },
         ...options.sessionId === undefined ? {} : { sessionId: String(options.sessionId) },

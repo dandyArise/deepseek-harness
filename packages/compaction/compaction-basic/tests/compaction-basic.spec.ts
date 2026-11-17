@@ -448,6 +448,14 @@ describe('compact configuration and defaults', () => {
     })
   })
 
+  it('scales default compaction and summary reserves when switching to a loaded Devstral instance', () => {
+    const target = { provider: 'lmstudio', model: 'devstral' }
+    const policy = resolveTargetPolicy(resolveConfig({}), target)
+    expect(resolveCompactSpec(policy, 41_984, 0)).toMatchObject({
+      thresholdTokens: 31_488, retainTokens: 6_717, maxTokens: 10_496,
+    })
+  })
+
   it.each([500, 501])('rejects headroom %i that exhausts the remaining capacity', (headroomTokens) => {
     const policy = resolveTargetPolicy(resolveConfig({ headroomTokens }), { provider: MODEL, model: MODEL })
     expect(() => resolveCompactSpec(policy, 1_000, 500))

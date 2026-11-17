@@ -98,6 +98,34 @@ export class SessionCommandController {
   /** Register complete-history empty-prompt eligibility. @returns when command admission is ready. */
   async initialize(): Promise<void> {
     this.continuation = await this.ctx.sessionProjections.register(continuationProjectionDefinition)
+    this.ctx.on('session/event', (session, event) => {
+      if (event.type !== 'turn/end' || event.data.reason.kind !== 'max-tokens') return
+      const agent = this.ctx.agents.get(session.id)
+      if (!agent || agent.session !== session || agent.inbox.nextTurn.length || agent.inbox.nextStep.length) return
+      const events = session.snapshotEvents()
+      const start = events.findLastIndex(entry => entry.type === 'turn/start')
+      if (start < 0) return
+      const turn = events.slice(start)
+      const latest = turn.findLast(entry => entry.type === 'assistant/message')
+      if (!latest || latest.data.interrupted || latest.data.message.content.some(block => block.type === 'tool-call')
+        || !latest.data.message.content.some(block => block.type === 'text' && block.text.trim())) return
+      // A turn can retain a previous step's max-tokens reason. Verify the
+      // final stream and skip even a partially emitted tool call.
+      const stream = latest.data.stream
+      if (!stream?.some(frame => frame.type === 'chunk' && frame.chunk.type === 'finish' && frame.chunk.reason.kind === 'max-tokens')
+        || stream.some(frame => frame.type === 'tool-call-chunks' || (frame.type === 'chunk'
+          && frame.chunk.type === 'block-start' && frame.chunk.blockType === 'tool-call'))) return
+      // Only a human request starts an automatic continuation. The queued retry is
+      // itself ineligible, even if the next generation hits the same limit.
+      if (!turn.some(entry => entry.type === 'user/message' && entry.surfaceOp === 'append' && entry.data.source.kind === 'user')
+        || turn.some(entry => entry.type === 'user/message' && entry.data.source.kind === 'retry')) return
+      const requestId = brandString<SessionRequestId>(`auto-continue-${event.seq}`)
+      void agent.whenIdle().then(async () => {
+        if (this.ctx.agents.get(session.id) !== agent || this.continuation.stateOf(session).ending !== event.seq) return
+        await this.prompt({ sessionId: session.id, requestId, content: [], mode: 'queue' },
+          { kind: 'retry', rpcId: requestId }, event.seq)
+      }).catch(error => this.ctx.logger.debug('Automatic continuation unavailable', error))
+    })
   }
 
   /**
@@ -318,7 +346,7 @@ export class SessionCommandController {
    * @param source - caller metadata recorded on the accepted ordinary or retry user message.
    * @returns acknowledgement that the Agent accepted the prompt.
    */
-  async prompt(request: SessionPromptRequest, source: MessageSource): Promise<SessionPromptValue> {
+  async prompt(request: SessionPromptRequest, source: MessageSource, expectedEnding?: SessionSeq): Promise<SessionPromptValue> {
     const agent = await this.resolveAgent(request.sessionId)
     if (this.hasPromptRequest(agent.session, request.requestId)) return { accepted: true }
     if (request.content.length === 0) {
@@ -326,7 +354,7 @@ export class SessionCommandController {
         return await agent.runMaintenance(() => {
           const inbox = agent.inbox
           const continuation = this.continuation.stateOf(agent.session)
-          if (request.mode !== 'queue' || continuation.ending === null
+          if (request.mode !== 'queue' || continuation.ending === null || (expectedEnding !== undefined && expectedEnding !== continuation.ending)
             || inbox.nextTurn.length > 0 || inbox.nextStep.some(message => message.source.kind === 'user')) {
             throw new RemoteError('session/agent-busy', 'generation continuation is unavailable', { reason: 'NO_CONTINUABLE_FAILURE_OR_PENDING_INPUT' })
           }

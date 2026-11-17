@@ -57,6 +57,8 @@ export type ResolvedRetention =
 
 /** Validated policy fields shared before and after exact-target matching. */
 interface ResolvedPolicyFields {
+  readonly fixedHeadroom?: true
+  readonly fixedSummaryLimit?: true
   readonly thresholdRatio: number
   readonly headroomTokens: number
   readonly summarizationProvider: string

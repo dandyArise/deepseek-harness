@@ -728,7 +728,9 @@ function resolveModelReasoning(
   const imported = declaredLevels?.length
     ? Object.fromEntries(THINKING_LEVELS.filter(level => declaredLevels.includes(level)).map(level => [level, level]))
     : undefined
-  const efforts = entry.reasoningEfforts ?? (entry.lmStudio?.overrides?.effort === false ? false : imported)
+  const efforts = entry.reasoningEfforts === undefined
+    ? (entry.lmStudio?.overrides?.effort === false ? false : imported)
+    : entry.reasoningEfforts
   if (efforts === undefined) {
     // Reasoning rides the installed entry or is absent: a bare capability flag
     // would make pi-ai advertise effort levels with no `thinkingLevelMap` to

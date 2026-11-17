@@ -27,7 +27,11 @@ it.skipIf(!model || !process.env.LM_API_TOKEN)('Devstral answers and reads a fre
     expect(calls.map(call => call.name)).toEqual(['lire_suivi'])
     const code = randomBytes(8).toString('hex')
     const result = createToolResultMessage({ callId: calls[0]!.id, content: [{ type: 'text', text: JSON.stringify({ numero_suivi: code }) }], isError: false })
-    const final = await assemble(ctx, { ...request, messages: [...messages, first.message, result], tools })
+    const reminder = createUserMessage({
+      source: { kind: 'repeat-tool-reminder' },
+      content: [{ type: 'text', text: 'Utilise le résultat précédent pour répondre.' }],
+    })
+    const final = await assemble(ctx, { ...request, messages: [...messages, first.message, result, reminder], tools })
     expect(text(final)).toContain(code)
   } finally {
     await ctx.fiber.dispose()
