@@ -131,7 +131,7 @@ export class ClientWorkspaceModel implements WorkspaceFollowSink {
    * @returns generated Remote result.
    */
   async delete(workspaceId: WorkspaceId): Promise<RemoteResult<WorkspaceDeleteValue>> {
-    const result = await this.remote.delete({ workspaceId })
+    const result = await this.remote.delete({ workspaceId, deleteSessions: true })
     if (result.ok) this.remove(workspaceId, true)
     return result
   }

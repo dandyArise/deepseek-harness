@@ -86,6 +86,8 @@ export interface WorkspaceValue {
 /** Workspace registration deletion. */
 export interface WorkspaceDeleteRequest {
   readonly workspaceId: WorkspaceId
+  /** Permanently delete the group's conversations after user confirmation. */
+  readonly deleteSessions?: boolean
 }
 
 /** Receipt after one Workspace registration is deleted. */

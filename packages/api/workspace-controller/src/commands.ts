@@ -93,13 +93,14 @@ export class WorkspaceCommands {
   }
 
   /**
-   * Delete one Workspace registration without deleting its directory or Sessions.
+   * Delete one Workspace registration and optionally its Sessions, retaining its directory.
    * @param request - Workspace identity to remove.
    * @returns deletion confirmation.
    */
   delete(request: WorkspaceDeleteRequest): Promise<WorkspaceDeleteValue> {
     return this.enqueue(async () => {
-      if (!await this.ctx.workspaceRegistry.delete(brandString<WorkspaceId>(request.workspaceId))) {
+      if (!await this.ctx.workspaceRegistry.delete(brandString<WorkspaceId>(request.workspaceId),
+        { deleteSessions: request.deleteSessions === true })) {
         throw workspaceNotFound(request.workspaceId)
       }
       return { deleted: true }

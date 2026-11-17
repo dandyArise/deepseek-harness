@@ -565,7 +565,7 @@ describe('ClientWorkspaceModel', () => {
     const model = modelFor(remote)
     baseline(model, [workspace('gone')])
     await expect(model.delete(wid('gone'))).resolves.toMatchObject({ ok: true })
-    expect(remote.calls).toContainEqual({ method: 'delete', request: { workspaceId: 'gone' } })
+    expect(remote.calls).toContainEqual({ method: 'delete', request: { workspaceId: 'gone', deleteSessions: true } })
     expect(model.getSnapshot().items).toEqual([])
     model.removeView(wid('gone'))
     expect(model.getSnapshot().items).toEqual([])

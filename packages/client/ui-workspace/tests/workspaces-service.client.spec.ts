@@ -1392,6 +1392,22 @@ describe('UiWorkspaceService', () => {
     expect(b.sessions.create).not.toHaveBeenCalled()
   })
 
+  it('clears the displayed conversation when another client deletes it', () => {
+    const b = bench()
+    b.uiWorkspace.openSession(sid('current'))
+    b.sessions.list.set(sessionState([summary('current')]))
+    b.sessions.list.set(sessionState())
+    expect(b.sessions.retained[0]!.release).toHaveBeenCalledOnce()
+    expect(b.selectPanel).toHaveBeenLastCalledWith(null)
+    expect(b.sessions.create).not.toHaveBeenCalled()
+  })
+
+  it('forgets a deleted saved conversation on startup', async () => {
+    const saved = persistSelection({ sessionId: sid('deleted') })
+    bench({ sessions: sessionState(), workspaces: workspaceState() })
+    await vi.waitFor(() => expect(JSON.parse(saved.get('dsh.sessions.current')!)).toEqual({}))
+  })
+
   it('does not let a pending startup Workspace replace a manual Session selection', async () => {
     const created = Promise.withResolvers<SessionId>()
     const b = bench({
