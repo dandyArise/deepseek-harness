@@ -44,6 +44,23 @@ function baselines(accept: MockInstance): number {
 }
 
 describe('Session Controller Client apply', () => {
+  it('removes cold sessions and durable subagents immediately on permanent deletion', async ({ mock, start }) => {
+    mock.remote.session.list.mockResolvedValue(ok({ items: [
+      { sessionId: sid('cold-parent'), agentAvailable: false, running: false, blank: false, updatedAt: 1 },
+      { sessionId: sid('cold-child'), origin: 'subagent', parentSessionId: sid('cold-parent'), agentAvailable: false, running: false, blank: false, updatedAt: 1 },
+    ] }))
+    const { sessions } = await bench(start)
+    for (const id of ['cold-parent', 'cold-child']) {
+      await vi.waitFor(() => { expect(sessions.list.getSnapshot().byId[sid(id)]).toBeDefined() })
+    }
+    await emit(mock, 'api-session/removed', sid('cold-child'))
+    expect(sessions.list.getSnapshot().byId[sid('cold-child')]).toBeDefined()
+    for (const id of ['cold-child', 'cold-parent']) {
+      await emit(mock, 'api-session/removed', sid(id), true)
+      await vi.waitFor(() => { expect(sessions.list.getSnapshot().byId[sid(id)]).toBeUndefined() })
+    }
+  }, COLD_BOOT_TIMEOUT_MS)
+
   it('routes Remote events from the $events stream into the object layer and runs handleConnected once per generation', async ({ mock, start }) => {
     const connected = vi.spyOn(ClientSessions.prototype, 'handleConnected')
     const error = vi.spyOn(ClientSessions.prototype, 'handleSessionError')

@@ -687,11 +687,11 @@ declare module '@deepseek-ai/cordis' {
      */
     'api-session/added'(summary: SessionSummary): void
     /**
-     * A Session left the live Host registry.
+     * A Session left the live Host registry or was permanently deleted.
      * @mode emit
      * @param sessionId - removed Session identity.
      */
-    'api-session/removed'(sessionId: SessionId): void
+    'api-session/removed'(sessionId: SessionId, permanent?: boolean): void
     /**
      * One Agent changed running state.
      * @mode emit
