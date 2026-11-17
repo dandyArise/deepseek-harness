@@ -139,6 +139,10 @@ function failureMessage(error: unknown): string {
 export class SubagentManager {
   /** Child session id → its live Activation. Process-local, never durable. */
   private readonly resident = new Map<SessionId, Activation>()
+
+  hasActiveRun(child: SessionId): boolean {
+    return this.resident.has(child)
+  }
   /** Root identities retain their pool across child settlement without retaining dead roots. */
   private readonly rootPools = new WeakMap<Agent, ActivationPool>()
   /** Materializations admitted before drain, tracked through publication or rollback. */

@@ -11,6 +11,8 @@ import { errorChain, type ReasoningEffortId, type MessageSource } from '@deepsee
 import type {} from '@deepseek-ai/dsh-client-file-upload'
 import { canOpenNativePath, nativeFileManager, nativeFileApplications, openNativeFileApplication, openNativeAssociatedPath, revealNativePath } from '@deepseek-ai/dsh-native-command'
 import type { SessionId } from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-subagent'
+import type { SessionSubagentArchiveRequest, SessionSubagentArchiveValue } from './types.ts'
 import type {} from '@deepseek-ai/dsh-session-projection-cache'
 import type { SessionObservation } from '@deepseek-ai/dsh-session-query'
 import { Remote, RemoteError, TypertRemoteService, principalOf, type TypertResourceResolveInput } from '@deepseek-ai/dsh-typert-protocol'
@@ -438,6 +440,16 @@ export class SessionController extends TypertRemoteService {
   @Remote('rename')
   rename(request: SessionRenameRequest): Promise<SessionRenameValue> {
     return this.commands.rename(request)
+  }
+
+  /** Update the direct-child archive owned by the addressed ordinary parent. */
+  @Remote('updateSubagentArchive')
+  async updateSubagentArchive(request: SessionSubagentArchiveRequest): Promise<SessionSubagentArchiveValue> {
+    const result = await this.agents.resolveAgent(request.sessionId)
+    if ('error' in result) throw result.error
+    const subagents = this.ctx.get('subagents')
+    if (!subagents) throw new RemoteError('gateway/internal', 'Subagent archive is unavailable', {})
+    return subagents.updateArchive(result.agent.session, request.update)
   }
 
   /**

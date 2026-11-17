@@ -120,7 +120,9 @@ describe('apply', () => {
     ctx.provide('resources', { register: registerResource } as never)
     ctx.provide('sidebarRightTabs', { register: registerTab } as never)
     await vi.waitFor(() => { expect(registerResource).toHaveBeenCalledOnce() })
-    expect(registerTab).toHaveBeenCalledOnce()
+    expect(registerTab).toHaveBeenCalledTimes(2)
+    expect(registerTab).toHaveBeenCalledWith(expect.objectContaining({ kind: 'agents' }))
+    expect(registerTab).toHaveBeenCalledWith(expect.objectContaining({ kind: 'subagentchat' }))
     expect(ctx.slots.entries('conversation.session.header.actions.subagent.footer')).toHaveLength(1)
   })
 

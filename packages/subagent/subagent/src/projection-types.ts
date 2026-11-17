@@ -89,8 +89,19 @@ export type SubagentIdentityProjection =
     seq: SessionSeq
   }
 
+export interface SubagentArchiveState {
+  archived: SessionId[]
+  auto: boolean
+}
+
+export type SubagentArchiveUpdate =
+  | { action: 'archiveCompleted' }
+  | { action: 'restore'; childId: SessionId }
+  | { action: 'setAuto'; enabled: boolean }
+
 declare module '@deepseek-ai/dsh-session-projection/types' {
   interface SessionProjectionMap {
+    subagentArchive: SubagentArchiveState
     /** Direct children in parent catalog event order, excluding fork-inherited facts. */
     subagentCatalog: SubagentCatalogEntry[]
     /** Active-turn duration and latest closed-turn completion for a descriptor-backed subagent session. */

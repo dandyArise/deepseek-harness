@@ -47,6 +47,25 @@ describe('current event admission at EOF', () => {
     return path
   }
 
+  it('reopens archived subagents and persists their restoration', async () => {
+    const archive = { type: 'subagent/popup-archive', seq: 1, time: 2, data: { add: ['child'] } }
+    await store(Buffer.from(prefix + JSON.stringify(archive) + '\n'))
+    const writer = await ctx.sessionPersistence.open(id, 'write')
+    const restore = { type: 'subagent/popup-archive', seq: SessionSeq(2), time: 3, data: { restore: brandString<SessionId>('child') } } as const
+    try {
+      expect((await writer.read()).events).toEqual([start, archive])
+      await writer.append([restore])
+    } finally {
+      await writer.close()
+    }
+    const reader = await ctx.sessionPersistence.open(id, 'read')
+    try {
+      expect((await reader.read()).events).toEqual([start, archive, restore])
+    } finally {
+      await reader.close()
+    }
+  })
+
   it.each([{ surfaceOp: 'append' }, { sourceEventSeqs: [] }])('refuses unknown required metadata %j without truncating a provider append', async (metadata) => {
     const event = { type: 'future/required', seq: 0, time: 1, data: {}, ...metadata }
     const bytes = Buffer.from([header, event].map(row => JSON.stringify(row)).join('\n') + '\n')

@@ -56,7 +56,47 @@ export function apply(ctx: ClientContext): void {
   ctx.inject(['resources', 'sidebarRightTabs'], (scope) => {
     registerSidebarChat(scope, ctx.locale.bind(NS))
   })
-  const catalogActions = (_parentSessionId: SessionId): SubagentCatalogInjected => ({
+  const catalogActions = (parentSessionId: SessionId): SubagentCatalogInjected => ({
+    async updateArchive(update) {
+      await ctx.sessions.using(parentSessionId, { source: 'sidebarChat' }, async (reference) => {
+        const { session } = await reference.ready
+        const result = await session.updateSubagentArchive(update)
+        if (!result.ok) throw new Error(result.error.message)
+      })
+      await ctx.sessions.refreshProjections(parentSessionId)
+    },
+    openAgents: () => ctx.sidebarRight.openTab('agents'),
+    async agentAction(address, action) {
+      return ctx.sessions.using(address, { source: 'sidebarChat' }, async (reference) => {
+        const { session, eventSource } = await reference.ready
+        if (action === 'stop') {
+          const result = await session.cancel()
+          if (!result.ok) throw new Error(result.error.message)
+          return ''
+        }
+        if (session.getSnapshot().openError) throw new Error('Lecture de la session impossible')
+        if (action === 'result') {
+          const entries = eventSource.getSnapshot().entries
+          const end = entries.findLastIndex(({ event }) => event.type === 'turn/end')
+          const start = entries.slice(0, end).findLastIndex(({ event }) => event.type === 'turn/start')
+          const last = entries.slice(start + 1, end).findLast(({ event }) => event.type === 'assistant/message')?.event
+          const text = last?.type === 'assistant/message' && last.data.message.content.filter(part => part.type === 'text').map(part => part.text).join('')
+          if (!text) throw new Error('Résultat final indisponible')
+          return text
+        }
+        const descriptor = ctx.sessions.list.getSnapshot().byId[address.childSessionId]?.projectionValues?.subagent
+        if (!descriptor) throw new Error('Consigne indisponible : origine de la session inconnue')
+        await session.loadThrough(descriptor.seq)
+        const first = eventSource.getSnapshot().entries.find(({ event }) => event.seq > descriptor.seq && event.type === 'user/message' && event.data.source.kind === 'user')?.event
+        const text = first?.type === 'user/message' && first.data.content.filter(part => part.type === 'text').map(part => part.text).join('')
+        if (!text) throw new Error('Consigne du parent indisponible')
+        if (action === 'instruction') return text
+        if (address.mode !== 'continuable' || session.getSnapshot().running) throw new Error('Cette session ne peut pas être relancée')
+        const result = await session.prompt([{ type: 'text', text }], 'queue')
+        if (!result.ok) throw new Error(result.error.message)
+        return ''
+      })
+    },
     openChild(address: SubagentAddress) {
       ctx.uiWorkspace.openSession(address)
     },

@@ -8,6 +8,8 @@
  */
 
 import { Context } from '@deepseek-ai/cordis'
+import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import { mountWorkingDirectoryFixture } from '../../../subagent/subagent/tests/working-directory-fixture.ts'
 import type { AttachmentId } from '@deepseek-ai/dsh-attachment/types'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -109,6 +111,22 @@ function message(text: string) {
 }
 
 describe('Session Controller access', () => {
+  it('scopes subagent archive writes to the addressed parent', async () => {
+    const { ctx } = await harness()
+    await mountWorkingDirectoryFixture(ctx)
+    await ctx.plugin(SubagentRuntime)
+    await ctx.plugin(TypertGatewayService)
+    guestPolicy(ctx, {
+      role: { name: 'test:archive-editor', resource: 'session', actions: ['session/updateSubagentArchive'] },
+      resource: { kind: 'session', id: SHARED },
+    })
+    try {
+      await expect(guestCall(ctx, 'updateSubagentArchive', { request: { sessionId: SHARED, update: { action: 'setAuto', enabled: true } } }))
+        .resolves.toMatchObject({ auto: true, archived: [] })
+      await expect(guestCall(ctx, 'updateSubagentArchive', { request: { sessionId: PRIVATE, update: { action: 'archiveCompleted' } } }))
+        .rejects.toMatchObject({ code: 'remote-access/denied' })
+    } finally { await ctx.fiber.dispose() }
+  })
   it('owns the Session resource kind and its default resolver', async () => {
     const { ctx } = await harness()
     expect(() => ctx.typert.resources.register('session', { field: 'sessionId' })).toThrow(/already registered/)

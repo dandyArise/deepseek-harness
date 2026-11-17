@@ -104,6 +104,7 @@ export const VIEWER_ENDPOINT_CLASSES = {
   'session/search': 'owner-only', // owner searches across Sessions
   'session/selectModel': 'owner-only', // owner selects a Session model
   'session/updateQueue': 'owner-only', // owner edits queued input
+  'session/updateSubagentArchive': 'owner-only', // owner manages child archive visibility
   'session/workspacePathApplications': 'owner-only', // owner applies a Workspace path
   'sessionStatus/follow': 'owner-only', // owner reading reminders
   'sessionStatus/mark': 'owner-only', // owner reading reminders

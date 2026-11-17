@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { contextMenuHook } from '@deepseek-ai/dsh-client-test-runtime'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { allowAllAccess, makeTranslate, RemoteError, sessionSnapshot } from '@deepseek-ai/dsh-client-test-runtime'
 import type {
   SessionListState, SessionSummary, SessionSnapshot,
@@ -217,6 +217,135 @@ function HeaderCatalog(props: HeaderCatalogProps) {
 }
 
 describe('SubagentHeaderLineage', () => {
+  it('uses shared archive state, restores the addressed child, and keeps running children visible', async () => {
+    const update = vi.fn().mockResolvedValue(undefined)
+    const sibling = 'child-2' as SessionId
+    const panel = (archived: SessionId[], auto: boolean) => <HeaderCatalog
+      {...props(catalog({ entries: [
+        { id: CHILD, mode: 'continuable', label: 'worker', activity: 'inactive' },
+        { id: sibling, mode: 'continuable', label: 'reviewer', activity: 'running' },
+      ] }), {}, {
+        [PARENT]: { ...summary(PARENT, 1), projectionValues: { subagentArchive: { archived, auto } } },
+        [CHILD]: { ...summary(CHILD, 1), running: false,
+          projectionValues: { subagentTiming: { settledMs: 500, lastTurnCompleted: true } } },
+        [sibling]: { ...summary(sibling, 1), running: true },
+      })}
+      agentAction={vi.fn()} updateArchive={update} t={makeTranslate(en)} />
+    const view = render(panel([], false))
+    fireEvent.click(screen.getByRole('button', { name: /2/ }))
+    const optIn = screen.getByRole('checkbox', { name: en['archive.auto'] }) as HTMLInputElement
+    expect(optIn.checked).toBe(false)
+    fireEvent.click(optIn)
+    await waitFor(() => expect(optIn.disabled).toBe(false))
+    expect(update).toHaveBeenCalledWith({ action: 'setAuto', enabled: true })
+    fireEvent.click(screen.getByRole('button', { name: en['archive.completed'] }))
+    await waitFor(() => expect(optIn.disabled).toBe(false))
+    expect(update).toHaveBeenCalledWith({ action: 'archiveCompleted' })
+    view.rerender(panel([CHILD, sibling], true))
+    expect(optIn.checked).toBe(true)
+    const disclosure = screen.getByText('Archived (1)')
+    expect(disclosure.closest('details')!.open).toBe(false)
+    expect(screen.getByRole('group', { name: /child-2 · reviewer/ }).closest('details')).toBeNull()
+    fireEvent.click(disclosure)
+    fireEvent.click(within(disclosure.closest('details')!).getByRole('button', { name: 'Restore' }))
+    expect(update).toHaveBeenCalledWith({ action: 'restore', childId: CHILD })
+    await waitFor(() => expect(optIn.disabled).toBe(false))
+    view.rerender(panel([], true))
+    expect(screen.queryByText('Archived (1)')).toBeNull()
+    expect(screen.getByRole('group', { name: /child · worker/ }).closest('details')).toBeNull()
+  })
+
+  it('recomputes shares of measured usage when a sibling reports more tokens', () => {
+    const sibling = 'child-2' as SessionId
+    const usage = (id: SessionId, count: number) => ({
+      ...summary(id, 1), projectionValues: {
+        tokenUsage: { uncachedInputTokens: count, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      },
+    })
+    const popup = (count: number) => <HeaderCatalog
+      {...props(catalog(), {}, { [CHILD]: usage(CHILD, 100), [sibling]: usage(sibling, count) })}
+      agentAction={vi.fn()} t={makeTranslate(en)} />
+    const view = render(popup(300))
+    fireEvent.click(screen.getByRole('button', { name: /2/ }))
+    const row = screen.getByRole('group', { name: /child · worker/ })
+    expect(row.querySelector('progress')?.position).toBe(0.25)
+    expect(row.textContent).toMatch(/25\s*%/)
+    expect(screen.queryByRole('spinbutton')).toBeNull()
+    view.rerender(popup(400))
+    expect(row.querySelector('progress')?.position).toBe(0.2)
+    expect(row.textContent).toMatch(/20\s*%/)
+    expect(screen.getByText(/Recorded usage/).textContent).toContain('500')
+  })
+
+  it('restarts the completed child selected in the popup', async () => {
+    const perform = vi.fn().mockResolvedValue('')
+    const input = props(catalog(), {}, {
+      [CHILD]: { ...summary(CHILD, 1), running: false, projectionValues: {
+        subagentTiming: { settledMs: 500, lastTurnCompleted: true },
+      } },
+    })
+    render(<HeaderCatalog {...input} agentAction={perform} />)
+    fireEvent.click(screen.getByRole('button', { name: /2/ }))
+    const row = within(await screen.findByRole('group', { name: /child · worker/ }))
+    expect(row.getByTitle('Copier le résultat')).toBeTruthy()
+    fireEvent.click(row.getByTitle('Relancer'))
+    expect(perform.mock.calls).toEqual([[{ parentSessionId: PARENT, childSessionId: CHILD, mode: 'continuable' }, 'retry']])
+  })
+
+  it('retries only result retrieval when copying a completed child fails to read its response', async () => {
+    const target = document.createElement('aside')
+    target.id = `session-agents-sidebar-${PARENT}`
+    document.body.append(target)
+    const perform = vi.fn().mockRejectedValueOnce(new Error('Transport hors ligne')).mockResolvedValueOnce('route CSV')
+    const copy = vi.fn().mockResolvedValue(undefined)
+    const original = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: copy } })
+    try {
+      const input = props(catalog({ entries: [{ id: CHILD, mode: 'continuable', activity: 'inactive', label: 'worker' }] }), {}, {
+        [CHILD]: { ...summary(CHILD, 1), running: false, projectionValues: {
+          subagentTiming: { settledMs: 500, lastTurnCompleted: true },
+        } },
+      })
+      render(<HeaderCatalog {...input} agentAction={perform} />)
+      fireEvent.click(within(target).getByText('Copier le résultat'))
+      fireEvent.click(await within(target).findByText('Relancer la récupération'))
+      await within(target).findByText('Résultat copié')
+      expect(perform.mock.calls.map(call => call[1])).toEqual(['result', 'result'])
+      expect(copy).toHaveBeenCalledWith('route CSV')
+    } finally {
+      target.remove()
+      if (original) Object.defineProperty(navigator, 'clipboard', original)
+      else Reflect.deleteProperty(navigator, 'clipboard')
+    }
+  })
+
+  it('opens the selected child from the sidebar and sums only reported usage', () => {
+    const target = document.createElement('aside')
+    target.id = `session-agents-sidebar-${PARENT}`
+    document.body.append(target)
+    try {
+      const input = props(catalog(), { [CHILD]: catalog({ state: 'error', entries: [] }) }, {
+        [CHILD]: { ...summary(CHILD, 1), running: true, projectionValues: {
+          tokenUsage: { uncachedInputTokens: 30, outputTokens: 40, cacheReadTokens: 20, cacheWriteTokens: 10 },
+        } },
+      })
+      render(<HeaderCatalog {...input} t={makeTranslate(en)} />)
+      const first = within(target).getByRole('button', { name: /child · worker/ })
+      const second = within(target).getByRole('button', { name: /child-2 · reviewer/ })
+      expect(first!.textContent).toContain('child · worker')
+      expect(first!.querySelector('progress')?.value).toBe(100)
+      expect(second!.querySelector('progress')).toBeNull()
+      expect(target.querySelector('footer')?.textContent).toContain('100')
+      fireEvent.click(first!)
+      expect(input.openChildAside).toHaveBeenCalledWith({ parentSessionId: PARENT, childSessionId: CHILD, mode: 'continuable' })
+      fireEvent.click(target.querySelector('summary')!)
+      fireEvent.click(within(target).getByRole('button', { name: en.retry }))
+      expect(input.refreshProjection).toHaveBeenCalledWith(CHILD)
+    } finally {
+      target.remove()
+    }
+  })
+
   it.each([
     { dictionary: zh, total: '2 个子智能体', running: '1 个子智能体，正在运行' },
     { dictionary: en, total: '2 subagents', running: '1 subagent running' },

@@ -40,6 +40,24 @@ export function apply(ctx: Context, config: Config = {}): void {
   const interrupt = config.interrupt !== false
   const listAgents = registerListAgents(ctx)
   registerWaitAgent(ctx)
+  ctx.tools.register(defineTool({
+    name: 'archive_completed_agents',
+    description: 'Archive your completed direct subagents in the session UI. Their conversations remain available for restoration.',
+    parameters: {},
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: { archivedCount: { type: 'number', required: true } },
+      },
+      render: (_args, value) => [{ type: 'text', text: `Total archived direct subagents: ${value.archivedCount}` }],
+    },
+    async execute(_args, exec) {
+      if (!exec.agent) throw new ToolContextUnavailableError('archive_completed_agents requires a calling agent')
+      const archive = await ctx.subagents.updateArchive(exec.agent.session, { action: 'archiveCompleted' })
+      return { archivedCount: archive.archived.length }
+    },
+  }))
   const sendMessage = defineTool({
     name: 'send_message',
     description:

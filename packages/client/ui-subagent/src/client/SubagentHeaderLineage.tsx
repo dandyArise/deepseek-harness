@@ -1,10 +1,10 @@
-import { useMemo, useEffect, useId, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
+import { useMemo, useEffect, useId, useRef, useState, useSyncExternalStore, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
   type SessionProjectionMap, type SessionSummary,
   type SessionProjectionSnapshot,
 } from '@deepseek-ai/dsh-api-session-controller/client'
-import type { SubagentAddress } from '@deepseek-ai/dsh-subagent/client'
+import type { SubagentAddress, SubagentArchiveUpdate } from '@deepseek-ai/dsh-subagent/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import {
   IconChevronRightOutlineRegular, IconRefreshOutlineRegular, IconUsersOutlineRegular,
@@ -18,14 +18,22 @@ import type {} from '@deepseek-ai/dsh-agent-team/client'
 import type {} from './slots.ts'
 import css from './SubagentHeaderLineage.module.css'
 
+function subscribeSidebar(listener: () => void) {
+  document.addEventListener('session-agents-sidebar-change', listener)
+  return () => document.removeEventListener('session-agents-sidebar-change', listener)
+}
+
 type SubagentCatalogSnapshot = Omit<SessionProjectionSnapshot, 'values' | 'state'> & {
   state: 'idle' | 'loading' | 'ready' | 'migration-required' | 'error'
-  entries: (SessionProjectionMap['subagentCatalog'][number] & { activity: 'running' | 'inactive' })[]
+  entries: (SessionProjectionMap['subagentCatalog'][number] & { activity: 'running' | 'inactive'; failed?: boolean })[]
 }
 type Catalogs = Readonly<Record<SessionId, SubagentCatalogSnapshot>>
 
 /** Business actions supplied by the slot registration. */
 export type SubagentCatalogInjected = {
+  updateArchive?: (update: SubagentArchiveUpdate) => Promise<void>
+  openAgents?: () => void
+  agentAction?: (address: SubagentAddress, action: 'stop' | 'result' | 'instruction' | 'retry') => Promise<string>
   openChild: (address: SubagentAddress) => void
   openChildAside: (address: SubagentAddress) => void
   refreshProjection: (parentSessionId: SessionId) => void
@@ -229,15 +237,18 @@ function catalogProgress(entries: SubagentCatalogSnapshot['entries'], summaries:
   let active = 0
   let inactive = 0
   let external = 0
+  let failed = 0
   for (const entry of entries) {
     if (entry.mode === 'external') external++
     else if (entry.activity === 'running') active++
+    else if (entry.failed) failed++
     else if (completedEntry(entry, summaries[entry.id])) completed++
     else inactive++
   }
   return [
     ...completed > 0 ? [t('progress.completed', { count: completed })] : [],
     ...active > 0 ? [t('progress.active', { count: active })] : [],
+    ...failed > 0 ? [t('progress.failed', { count: failed })] : [],
     ...inactive > 0 ? [t('progress.inactive', { count: inactive })] : [],
     ...external > 0 ? [t('progress.external', { count: external })] : [],
   ].join('\u2002·\u2002')
@@ -296,7 +307,7 @@ function CatalogRows({
         const completed = completedEntry(entry, summary)
         const activity = external ? undefined : entry.activity === 'running'
           ? t('activity.running')
-          : completed
+          : entry.failed ? t('activity.failed') : completed
             ? t('activity.completed')
             : t('activity.inactive')
         const secondary = [secondaryLabel, mode, activity]
@@ -387,6 +398,7 @@ function CatalogRows({
                     <span className={css.secondaryLabel}>{secondaryLabel}</span>
                   )}
                 </span>
+                <StatusPill status={agentStatus(entry, summary)} t={t} />
                 {metrics !== '' && (
                   <span className={css.metrics}>
                     {tokenMetric !== undefined && <span className={css.metricToken}>{tokenMetric}</span>}
@@ -497,13 +509,158 @@ type CatalogDropdownProps = CatalogDropdownSharedProps & (
   }
 )
 
-/** One trigger-plus-tree dropdown over the catalog rooted at `rootSessionId`. */
+function agentStatus(entry: SubagentCatalogSnapshot['entries'][number], summary: SessionSummary | undefined) {
+  if (entry.mode === 'external') return 'external'
+  if (entry.activity === 'running') return 'running'
+  if (entry.failed) return 'failed'
+  return completedEntry(entry, summary) ? 'completed' : 'inactive'
+}
+
+function StatusPill({ status, t }: { status: ReturnType<typeof agentStatus>; t: TranslateNS<typeof NS> }) {
+  const symbols = { running: '◷', completed: '✓', failed: '!', inactive: 'Ⅱ', external: '↗' }
+  return <small data-status={status}><span aria-hidden="true">{symbols[status]} </span>
+    {t(status === 'external' ? 'mode.external' : `activity.${status}`)}
+  </small>
+}
+
+function AgentControls({ address, status, perform }: {
+  address: SubagentAddress
+  status: ReturnType<typeof agentStatus>
+  perform: NonNullable<SubagentCatalogInjected['agentAction']>
+}) {
+  const [instruction, setInstruction] = useState('')
+  const [message, setMessage] = useState('')
+  const [busy, setBusy] = useState(false)
+  const lock = useRef(false)
+  const [failedRead, setFailedRead] = useState<'instruction' | 'result' | undefined>()
+  const run = async (action: 'stop' | 'retry' | 'instruction' | 'result') => {
+    if (lock.current) return
+    lock.current = true
+    setBusy(true)
+    setMessage('')
+    let reading = true
+    try {
+      const text = await perform(address, action)
+      reading = false
+      setFailedRead(undefined)
+      if (action === 'instruction') setInstruction(text)
+      if (action === 'result') { await navigator.clipboard.writeText(text); setMessage('Résultat copié') }
+      if (action === 'stop') setMessage('Arrêt demandé')
+      if (action === 'retry') setMessage('Relance demandée')
+    } catch (error) {
+      if (reading && (action === 'result' || action === 'instruction')) setFailedRead(action)
+      setMessage(error instanceof Error ? error.message : String(error))
+    } finally { lock.current = false; setBusy(false) }
+  }
+  return <div className={css.agentControls}>
+    <details onToggle={(event) => { if (event.currentTarget.open && !instruction) void run('instruction') }}>
+      <summary>Consigne du parent</summary><p>{instruction}</p>
+    </details>
+    {status === 'running' && <button disabled={busy} title="Arrêter" onClick={() => void run('stop')}><span aria-hidden="true">■</span><span className={css.actionLabel}>Arrêter</span></button>}
+    {status === 'completed' && <button disabled={busy} title="Copier le résultat" onClick={() => void run('result')}><span aria-hidden="true">⧉</span><span className={css.actionLabel}>Copier le résultat</span></button>}
+    {(status === 'completed' || status === 'failed' || status === 'inactive') && address.mode === 'continuable' &&
+      <button disabled={busy} title="Relancer" onClick={() => void run('retry')}><span aria-hidden="true">↻</span><span className={css.actionLabel}>Relancer</span></button>}
+    {failedRead && <button disabled={busy} onClick={() => void run(failedRead)}>Relancer la récupération</button>}
+    <small role="status">{message}</small>
+  </div>
+}
+
+function AgentSidebar({
+  entries, summaries, catalogs, refreshProjection, progress, parentId, openChildAside, agentAction, archive, updateArchive, t,
+}: {
+  archive: SessionProjectionMap['subagentArchive'] | undefined
+  updateArchive: SubagentCatalogInjected['updateArchive']
+  agentAction: SubagentCatalogInjected['agentAction']
+  entries: SubagentCatalogSnapshot['entries']
+  summaries: CatalogRowsProps['summaries']
+  catalogs: Catalogs
+  refreshProjection: SubagentCatalogInjected['refreshProjection']
+  progress: string
+  parentId: SessionId
+  openChildAside: SubagentCatalogInjected['openChildAside']
+  t: TranslateNS<typeof NS>
+}) {
+  const [now, setNow] = useState(Date.now)
+  const [saving, setSaving] = useState(false)
+  const [archiveError, setArchiveError] = useState('')
+  async function saveArchive(change: SubagentArchiveUpdate) {
+    if (!updateArchive || saving) return
+    setSaving(true)
+    setArchiveError('')
+    try { await updateArchive(change) }
+    catch (error) { setArchiveError(error instanceof Error ? error.message : String(error)) }
+    finally { setSaving(false) }
+  }
+  const running = entries.some(entry => entry.mode !== 'external' && entry.activity === 'running')
+  useEffect(() => {
+    if (!running) return
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [running])
+  const rows = entries.map((entry) => {
+    const summary = summaries[entry.id]
+    const status = agentStatus(entry, summary)
+    return { entry, status, tokens: tokenTotal(summary?.projectionValues?.tokenUsage),
+      duration: activityDuration(summary, entry.activity, now) } as const
+  })
+  const rank = { running: 0, failed: 1, completed: 2, inactive: 3, external: 4 }
+  rows.sort((a, b) => rank[a.status] - rank[b.status])
+  const measured = rows.flatMap(row => row.tokens === undefined ? [] : [row.tokens])
+  const total = measured.reduce((sum, count) => sum + count, 0)
+  const percent = new Intl.NumberFormat(document.documentElement.lang || undefined, { style: 'percent', maximumSignificantDigits: 3 })
+  const archivedIds = new Set(archive?.archived)
+  const archived = rows.filter(({ entry, status }) => status === 'completed' && archivedIds.has(entry.id))
+  const visible = rows.filter(({ entry, status }) => status !== 'completed' || !archivedIds.has(entry.id))
+  const renderRow = ({ entry, status, tokens, duration }: typeof rows[number], isArchived: boolean) => {
+    const name = entryName(entry)
+    const title = entry.label && entry.label !== name ? `${name} · ${entry.label}` : name
+    const readError = entry.mode !== 'external' && catalogs[entry.id]?.state === 'error'
+    const mode = entry.mode === 'one-shot' ? t('mode.oneShot') : entry.mode === 'continuable' ? t('mode.continuable') : t(entry.mode === 'external' ? 'mode.external' : 'mode.unknown')
+    const share = tokens !== undefined && total > 0 ? percent.format(tokens / total) : undefined
+    return <div key={entry.id} role="group" aria-label={title} data-agent-id={entry.id} data-outcome={status}>
+      <button type="button" disabled={entry.mode === 'external'}
+        title={entry.mode === 'external' ? title : t('open.sidebar.aria', { label: title })}
+        onClick={() => { if (entry.mode !== 'external') openChildAside({ parentSessionId: parentId, childSessionId: entry.id, mode: entry.mode }) }}>
+        <b>{title}</b>
+        <StatusPill status={status} t={t} />
+        <small>{[mode, duration === undefined ? undefined : formatDuration(duration, t)].filter(Boolean).join(' · ')}</small>
+        <small>{t('tokens.total', { value: tokens === undefined ? '—' : formatTokens(tokens, t) })}
+          {share !== undefined && <> · {share}</>}</small>
+        {tokens !== undefined && total > 0 && <progress aria-hidden="true" value={tokens} max={total} />}
+      </button>
+      {isArchived
+        ? <div className={css.agentControls}><button disabled={saving} onClick={() => void saveArchive({ action: 'restore', childId: entry.id })}>{t('archive.restore')}</button></div>
+        : agentAction && entry.mode !== 'external' && <AgentControls address={{ parentSessionId: parentId, childSessionId: entry.id, mode: entry.mode }}
+          status={status} perform={agentAction} />}
+      {readError && <details className={css.sidebarError}><summary>{t('load.error')}</summary>
+        <p>{catalogs[entry.id]?.error?.message}</p>
+        <button type="button" onClick={() => refreshProjection(entry.id)}>{t('retry')}</button>
+      </details>}</div>
+  }
+  return <section className={css.agentSidebar} aria-label={t('section.title')}>
+    <header><strong>{t(rows.length === 1 ? 'count.total.one' : 'count.total.other', { count: rows.length })}</strong><small aria-live="polite">{progress}</small></header>
+    {visible.map(row => renderRow(row, false))}
+    {updateArchive && <div className={css.archiveToolbar}>
+      <button type="button" disabled={saving || !visible.some(row => row.status === 'completed')}
+        onClick={() => void saveArchive({ action: 'archiveCompleted' })}>{t('archive.completed')}</button>
+      <label><input type="checkbox" checked={archive?.auto ?? false} disabled={saving}
+        onChange={event => void saveArchive({ action: 'setAuto', enabled: event.currentTarget.checked })} /> {t('archive.auto')}</label>
+      {archiveError && <small role="alert">{archiveError}</small>}
+    </div>}
+    {archived.length > 0 && <details className={css.archivedRows}><summary>{t('archive.list', { count: archived.length })}</summary>
+      {archived.map(row => renderRow(row, true))}
+    </details>}
+    {measured.length > 0 && <footer>{t('sidebar.usage', { value: t('tokens.total', { value: formatTokens(total, t) }) })}</footer>}
+  </section>
+}
+
 function CatalogDropdown(props: CatalogDropdownProps) {
   const {
     rootSessionId, currentSessionId, displayTitle, openTitle, variant,
     useSessions, useSessionStatus, openChild, openChildAside, prepareCatalog, t, hasSharedTasks = false,
   } = props
   const ancestorSwitcher = variant === 'switcher' && openTitle !== undefined
+  const sidebar = useSyncExternalStore(subscribeSidebar, () => document.getElementById(`session-agents-sidebar-${rootSessionId}`), () => null)
   const projections = useSessions(state => state.projectionsBySession)
   const summaries = useSessions(state => state.byId)
   const statuses = useSessionStatus(value => value)
@@ -518,6 +675,7 @@ function CatalogDropdown(props: CatalogDropdownProps) {
         error: snapshot.error,
         entries: (projected ?? []).map(entry => ({
           ...entry,
+          failed: statuses.get(entry.id)?.completionFailed === true,
           activity: (statuses.get(entry.id)?.running ?? summaries[entry.id]?.running) === true
             ? 'running' as const : 'inactive' as const,
         })),
@@ -714,6 +872,11 @@ function CatalogDropdown(props: CatalogDropdownProps) {
       onKeyDown={navigate}
       onPointerLeave={scheduleHoverClose}
     >
+      {sidebar && variant === 'count' && currentSessionId === undefined && directCount > 0 && createPortal(
+        <AgentSidebar key={rootSessionId} agentAction={props.agentAction} entries={directChildren} summaries={summaries}
+          catalogs={catalogs} refreshProjection={props.refreshProjection} progress={progress}
+          archive={projections[rootSessionId]?.values.subagentArchive} updateArchive={props.updateArchive}
+          parentId={rootSessionId} openChildAside={openChildAside} t={t} />, sidebar)}
       <Tooltip
         label={t(totalCountKey, { count: directCount })}
         disabled={open || variant === 'switcher'}
@@ -782,7 +945,7 @@ function CatalogDropdown(props: CatalogDropdownProps) {
       {open && createPortal((
         <MenuSurface
           ref={menuRef}
-          className={css.menu}
+          className={variant === 'count' && props.agentAction && directCount ? `${css.menu} ${css.managementMenu}` : css.menu}
           style={{ positionAnchor: anchorName }}
           role="dialog"
           tabIndex={-1}
@@ -794,33 +957,41 @@ function CatalogDropdown(props: CatalogDropdownProps) {
           onPointerLeave={scheduleHoverClose}
         >
           <div className={css.menuBody}>
-            {hasSharedTasks && (
-              <div className={css.sectionHeader} data-subagent-section-header>
-                <span className={css.sectionIcon} aria-hidden><IconUsersOutlineRegular size={14} /></span>
-                <h3 className={css.sectionTitle}>{t('section.title')}</h3>
-                {progress && <span className={css.sectionProgress}>{progress}</span>}
+            {variant === 'count' && props.agentAction && directCount > 0 ? (
+              <AgentSidebar key={rootSessionId} entries={directChildren} summaries={summaries} catalogs={catalogs}
+                refreshProjection={props.refreshProjection} progress={progress} parentId={rootSessionId}
+                archive={projections[rootSessionId]?.values.subagentArchive} updateArchive={props.updateArchive}
+                agentAction={props.agentAction} t={t}
+                openChildAside={(address) => { openChildAside(address); changeOpen(false) }} />
+            ) : <>
+              {hasSharedTasks && (
+                <div className={css.sectionHeader} data-subagent-section-header>
+                  <span className={css.sectionIcon} aria-hidden><IconUsersOutlineRegular size={14} /></span>
+                  <h3 className={css.sectionTitle}>{t('section.title')}</h3>
+                  {progress && <span className={css.sectionProgress}>{progress}</span>}
+                </div>
+              )}
+              {hasSharedTasks && presentedCatalog.state === 'ready' && directCount === 0 && (
+                <p className={css.sectionEmpty}>{t('section.empty')}</p>
+              )}
+              <div role="tree" aria-label={t('tree.aria')}>
+                <CatalogRows
+                  parentSessionId={rootSessionId}
+                  currentSessionId={currentSessionId}
+                  catalog={presentedCatalog}
+                  catalogs={catalogs}
+                  summaries={summaries}
+                  expanded={expanded}
+                  level={1}
+                  openChild={openChild}
+                  openChildAside={openChildAside}
+                  refreshProjection={prepareLevel}
+                  toggleBranch={toggleBranch}
+                  closeCatalog={() => { changeOpen(false) }}
+                  t={t}
+                />
               </div>
-            )}
-            {hasSharedTasks && presentedCatalog.state === 'ready' && directCount === 0 && (
-              <p className={css.sectionEmpty}>{t('section.empty')}</p>
-            )}
-            <div role="tree" aria-label={t('tree.aria')}>
-              <CatalogRows
-                parentSessionId={rootSessionId}
-                currentSessionId={currentSessionId}
-                catalog={presentedCatalog}
-                catalogs={catalogs}
-                summaries={summaries}
-                expanded={expanded}
-                level={1}
-                openChild={openChild}
-                openChildAside={openChildAside}
-                refreshProjection={prepareLevel}
-                toggleBranch={toggleBranch}
-                closeCatalog={() => { changeOpen(false) }}
-                t={t}
-              />
-            </div>
+            </>}
             {props.renderFooter?.()}
           </div>
         </MenuSurface>
@@ -852,7 +1023,7 @@ export function SubagentCatalogAction(props: SubagentCatalogActionProps) {
 /** Bind task-board visibility only in root conversations. */
 function RootCatalogAction({
   sessionId, useProjection, useSessions, useSessionStatus, useFooterAvailable,
-  openChild, openChildAside, refreshProjection, prepareCatalog, t, renderSlot,
+  openChild, openChildAside, refreshProjection, prepareCatalog, agentAction, updateArchive, openAgents, t, renderSlot,
 }: SubagentCatalogActionProps) {
   const hasSharedTasks = useProjection('agentTeam', team => team?.enabled === true
     && team.tasks.some(task => task.status !== 'deleted'))
@@ -861,6 +1032,9 @@ function RootCatalogAction({
   return (
     <CatalogDropdown
       key={sessionId}
+      {...agentAction ? { agentAction } : {}}
+      {...updateArchive ? { updateArchive } : {}}
+      {...openAgents ? { openAgents } : {}}
       rootSessionId={sessionId}
       variant="count"
       hasSharedTasks={footerAvailable && hasSharedTasks}

@@ -171,6 +171,13 @@ export function SidebarChatTab({ useResource, useTabInfo, SessionProvider, rende
  * @param t - Chat namespace translator used for fallback tab titles.
  */
 export function registerSidebarChat(ctx: Context, t: TranslateNS<typeof NS>): void {
+  const agentsId = SUBAGENT_CHAT_ID + '/agents'
+  ctx.effect(() => ctx.sidebarRightTabs.register({
+    id: agentsId, kind: 'agents', priority: 'builtin', patterns: [], title: () => 'Agents',
+  }), 'ui-subagent: agents tab')
+  ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
+    name: 'sidebar.right.pane.tab', key: agentsId,
+  }, AgentsTab)), 'ui-subagent: agents panel')
   ctx.effect(
     () => ctx.resources.register(subagentChatResourceProvider(ctx.sessions)),
     'ui-subagent: Sidebar chat resources',
@@ -196,4 +203,12 @@ export function registerSidebarChat(ctx: Context, t: TranslateNS<typeof NS>): vo
   ctx.effect(() => ctx.slots.inject('sidebar.chat.conversation', () => ctx.slots.register({
     name: 'sidebar.chat.conversation',
   }, ConversationSlotPanel)), 'ui-subagent: Sidebar Conversation')
+}
+
+function notifyAgentsTab() {
+  queueMicrotask(() => document.dispatchEvent(new Event('session-agents-sidebar-change')))
+}
+
+function AgentsTab({ sessionId }: PropsRuntime<'sidebar.right.pane.tab'>) {
+  return <div id={`session-agents-sidebar-${sessionId}`} ref={notifyAgentsTab} style={{ height: '100%', overflowY: 'auto' }} />
 }
