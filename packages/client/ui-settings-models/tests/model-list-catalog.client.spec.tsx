@@ -9,7 +9,8 @@ import { en } from '../src/client/locales.ts'
 afterEach(cleanup)
 
 it('imports LM Studio metadata once and keeps a vision correction across a second sync', async () => {
-  const lmStudio = { source: '/api/v1/models', vision: true, loadedContext: 8192, maxContext: 393216 }
+  const lmStudio = { source: '/api/v1/models', vision: true, loadedContext: 8192, maxContext: 393216,
+    effort: true, effortLevels: ['low', 'medium', 'high', 'xhigh'] }
   const discover = vi.fn<ModelsOperations['discoverModels']>()
     .mockResolvedValueOnce({ kind: 'found', models: [{ id: 'local-model', lmStudio }, { id: 'local-model', lmStudio }] })
     .mockResolvedValueOnce({ kind: 'found', models: [{ id: 'local-model', lmStudio: { ...lmStudio, loadedContext: 4096 } }] })
@@ -24,10 +25,13 @@ it('imports LM Studio metadata once and keeps a vision correction across a secon
     fireEvent.click(within(picker).getByRole('button', { name: en.fetchAdopt }))
   }
   await sync()
+  expect(onChange.mock.lastCall![0][0]?.lmStudio).toEqual(lmStudio)
   view.rerender(<ModelListEditor {...props} models={onChange.mock.lastCall![0]} />)
   fireEvent.click(screen.getByRole('button', { name: en.modelAdvanced + ' 1' }))
   fireEvent.change(screen.getByRole('combobox', { name: new RegExp(en.lmVision) }), { target: { value: 'false' } })
   const stored = JSON.parse(JSON.stringify(onChange.mock.lastCall![0])) as ModelDraft[]
+  // Older imports persisted the capability flag but omitted the offered levels.
+  Reflect.deleteProperty(stored[0]!.lmStudio as object, 'effortLevels')
   view.rerender(<ModelListEditor {...props} models={stored} />)
   await sync()
   expect(onChange.mock.lastCall![0]).toEqual([{ id: 'local-model', lmStudio: {

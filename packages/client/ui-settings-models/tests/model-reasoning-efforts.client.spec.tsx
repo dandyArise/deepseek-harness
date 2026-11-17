@@ -43,6 +43,18 @@ const add = () => screen.getByRole<HTMLButtonElement>('button', { name: en.model
 const entriesOf = (efforts: unknown) => Object.entries(efforts as object)
 
 describe('ModelReasoningEfforts', () => {
+  it('inherits imported levels without inventing Off and preserves an explicit disable', () => {
+    const model = { id: 'opaque', lmStudio: { source: '/api/v1/models', effortLevels: ['low', 'medium', 'high', 'xhigh'] } }
+    const { writes } = renderGroup(model)
+    expect(levels()).toEqual(['low', 'medium', 'high', 'xhigh'])
+    expect(writes).toEqual([])
+    fireEvent.click(toggle())
+    expect(writes.at(-1)).toEqual({ ...model, reasoningEfforts: false })
+    expect(levels()).toEqual([])
+    fireEvent.click(toggle())
+    expect(levels()).toEqual(['low', 'medium', 'high', 'xhigh'])
+  })
+
   it.each([
     ['absent', { id: 'chat' }],
     ['false', { id: 'chat', reasoningEfforts: false }],

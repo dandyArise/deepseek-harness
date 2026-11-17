@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import type { ReactNode } from 'react'
+import type { LlmDiscoveredModel } from '@deepseek-ai/dsh-api-remotes/client'
 import { IconPlusOutlineRegular, IconTrashOutlineRegular, Switch, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { DeepSeekModelDraft } from './DeepSeekModelsEditor.tsx'
 import { modelDrafts } from './DeepSeekModelsEditor.tsx'
@@ -10,6 +11,14 @@ import styles from './ModelsSection.module.css'
 
 /** Declared levels in stored order, each with the value stored for it, whatever a hand edit left there. */
 type Entries = readonly (readonly [string, unknown])[]
+
+/** Provider-declared levels remain inherited until the user edits them. */
+function importedEfforts(model: DeepSeekModelDraft): Entries | undefined {
+  const metadata = model.lmStudio as LlmDiscoveredModel['lmStudio']
+  return metadata?.effortLevels?.length
+    ? metadata.effortLevels.map(level => [level, level] as const)
+    : undefined
+}
 
 /** Levels a model offers when the switch is turned on, where the schema lists them: Off plus the common OpenAI-compatible trio. */
 const INITIAL_LEVELS: readonly string[] = ['off', 'low', 'medium', 'high']
@@ -38,6 +47,10 @@ function acceptedValue(level: string, wire: unknown): boolean {
  */
 function readEfforts(model: DeepSeekModelDraft): Entries | undefined {
   const value = model['reasoningEfforts']
+  if (value === undefined) {
+    const metadata = model.lmStudio as LlmDiscoveredModel['lmStudio']
+    return metadata?.overrides?.effort === false ? undefined : importedEfforts(model)
+  }
   if (value === null) return []
   if (typeof value !== 'object' || Array.isArray(value)) return undefined
   return Object.entries(value)
@@ -52,6 +65,10 @@ function readEfforts(model: DeepSeekModelDraft): Entries | undefined {
 function withEfforts(model: DeepSeekModelDraft, entries: Entries | undefined): DeepSeekModelDraft {
   const next = { ...model }
   if (entries === undefined) {
+    if (importedEfforts(model) !== undefined) {
+      next['reasoningEfforts'] = false
+      return next
+    }
     // Absent is how a hand-declared model says it does not reason.
     Reflect.deleteProperty(next, 'reasoningEfforts')
     return next
@@ -175,7 +192,8 @@ export function ModelReasoningEfforts(props: ModelReasoningEffortsProps): ReactN
     ...levels.includes(level) ? [] : [level],
     ...levels.filter(choice => choice === level || !used.includes(choice)),
   ]
-  const initialEntries = INITIAL_LEVELS.filter(level => levels.includes(level)).map(level => [level, defaultValue(level)] as const)
+  const initialEntries = importedEfforts(model)
+    ?? INITIAL_LEVELS.filter(level => levels.includes(level)).map(level => [level, defaultValue(level)] as const)
 
   const refused = entries?.some(([level, wire]) => !acceptedValue(level, wire)) === true
   const missingLevel = entries !== undefined && !used.some(level => level !== 'off')
