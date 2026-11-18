@@ -94,6 +94,11 @@ export interface ModelSelectInjected {
   directory: SnapshotStore<ModelDirectoryState>
   /** Ensure the shared advisory catalog is loaded (errors land on the store). */
   load: () => void
+  /** Verify one configured model and persist its result for the active protocol. */
+  verifyModel?: (provider: string, model: string, protocol: string) => Promise<{
+    status: 'verified' | 'blocked' | 'failed'
+    cause?: string
+  }>
   /**
    * Choose a catalog badge's provider-authored text for the active locale.
    * @param text - the badge's literal text or translations.

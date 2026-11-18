@@ -213,6 +213,29 @@ async function liveContext(config: ConstructorParameters<typeof SqliteSessionQue
 }
 
 describe('SQLite session search', () => {
+  it('purges indexed session content on deletion before the next search', async () => {
+    const path = await temporaryPath()
+    const ctx = await liveContext({ path })
+    try {
+      await ctx.plugin(JsonlSessionPersistence, { root: await temporaryPath('sessions'), compression: 'none' })
+      const target = header('erase')
+      const writer = await ctx.sessionPersistence.create(target)
+      await writer.append(messageEvents('indexed needle'))
+      await writer.close()
+      expect((await ctx.sessionQuery.searchSessions({ query: 'needle' })).items).toHaveLength(1)
+      await ctx.sessionPersistence.delete(target.id)
+      const db = new DatabaseSync(path, { readOnly: true })
+      try {
+        expect(db.prepare('SELECT session_id FROM persisted_docs WHERE session_id = ?').all(target.id)).toEqual([])
+        expect(db.prepare('SELECT id FROM persisted_sessions WHERE id = ?').all(target.id)).toEqual([])
+      } finally {
+        db.close()
+      }
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('defaults and validates opening policy and persisted inspection concurrency through its Cordis config', async () => {
     const defaultCtx = await liveContext()
     expect((defaultCtx.sessionQuery as SqliteSessionQueryEngine).config.openAt).toBe('startup')

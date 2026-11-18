@@ -73,10 +73,12 @@ export class ModelDirectory {
 
   /**
    * Ensure the Host generation's shared available catalog is loaded.
+   * @param refresh - re-read the persisted catalog after a verification operation.
    * @returns the fresh directory value.
    */
-  async load(): Promise<ModelDirectoryState> {
+  async load(refresh = false): Promise<ModelDirectoryState> {
     this.assertAvailable()
+    if (refresh) this.catalog.refresh()
     await this.catalog.load()
     this.syncInputs()
     return this.store.getSnapshot()

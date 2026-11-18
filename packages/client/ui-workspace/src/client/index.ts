@@ -354,6 +354,7 @@ export function apply(ctx: Context): void {
     notifyArchivedNotOpenable: () => { notify({ kind: 'archivedNotOpenable' }) },
     renameWorkspace: async (workspaceId, title) => { await workspaces.rename(workspaceId, title) },
     deleteWorkspace: async (workspaceId) => { await workspaces.delete(workspaceId) },
+    deleteSession: sessionId => uiWorkspace.deleteSession(sessionId),
     insertWorkspaceBefore: async (workspaceId, beforeWorkspaceId) => {
       await workspaces.insertBefore(workspaceId, beforeWorkspaceId)
     },
@@ -396,6 +397,9 @@ export function apply(ctx: Context): void {
   }, SessionMenu))
   registerSessionMenus(ctx, {
     ...pinInjected(), ...archiveInjected(), ...renameInjected(), ...forkInjected(), ...sessionIdInjected(),
+    requestSessionDelete: (sessionId, displayTitle) => {
+      workspaceActionRequest.set({ action: 'deleteSession', sessionId, displayTitle })
+    },
     markSession,
   })
   ctx.slots.inject('sidebar.workspaces.session.row.action', function* () {

@@ -98,6 +98,8 @@ export function resolveConfig(config: BasicCompactionConfig = {}): ResolvedConfi
   return deepFreeze({
     thresholdRatio,
     headroomTokens,
+    ...(config.headroomTokens !== undefined && { fixedHeadroom: true as const }),
+    ...(config.maxTokens !== undefined && { fixedSummaryLimit: true as const }),
     ...retention,
     summarizationProvider: config.summarizationProvider ?? '',
     summarizationModel: config.summarizationModel ?? '',
@@ -129,6 +131,8 @@ export function resolveTargetPolicy(
     target: { provider: target.provider, model: target.model },
     thresholdRatio: override?.thresholdRatio ?? config.thresholdRatio,
     headroomTokens: override?.headroomTokens ?? config.headroomTokens,
+    ...((override?.headroomTokens !== undefined || config.fixedHeadroom) && { fixedHeadroom: true as const }),
+    ...((override?.maxTokens !== undefined || config.fixedSummaryLimit) && { fixedSummaryLimit: true as const }),
     ...resolveRetention(override ?? {}, inheritedRetention),
     summarizationProvider: override?.summarizationProvider ?? config.summarizationProvider,
     summarizationModel: override?.summarizationModel ?? config.summarizationModel,
@@ -178,7 +182,10 @@ export function resolveCompactSpec(
       + "the adapter model's contextWindow above the effective request maxTokens",
     )
   }
-  const pressureBudgetTokens = messageBudgetTokens - policy.headroomTokens
+  // Scale the default reserve to the loaded model while honoring explicit policy.
+  const headroom = policy.fixedHeadroom ? policy.headroomTokens
+    : Math.min(policy.headroomTokens, Math.floor(messageBudgetTokens / 4))
+  const pressureBudgetTokens = messageBudgetTokens - headroom
   if (pressureBudgetTokens <= 0) {
     throw new TargetPressureConfigError(
       targetKey,
@@ -210,7 +217,7 @@ export function resolveCompactSpec(
     retainTokens,
     summarizationProvider: policy.summarizationProvider,
     summarizationModel: policy.summarizationModel,
-    maxTokens: policy.maxTokens,
+    maxTokens: policy.fixedSummaryLimit || policy.fixedHeadroom ? policy.maxTokens : Math.max(1, headroom),
     compactionRetries: policy.compactionRetries,
     maxOverflowRetries: policy.maxOverflowRetries,
   })

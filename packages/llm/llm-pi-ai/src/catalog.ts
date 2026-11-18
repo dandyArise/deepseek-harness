@@ -13,6 +13,7 @@
  */
 
 import { builtinProviders, getAllBuiltinModels, getBuiltinModels } from '@earendil-works/pi-ai/providers/all'
+import type { LmStudioModelMetadata } from '@deepseek-ai/dsh-llm'
 import type { BuiltinProvider } from '@earendil-works/pi-ai/providers/all'
 import type {
   AnthropicMessagesCompat,
@@ -602,6 +603,7 @@ function assertOfferedCompatFields(
 
 /** One configured model entry: an id plus the catalog fields it overrides. */
 export interface PiAiModelProfile {
+  lmStudio?: LmStudioModelMetadata
   /** Model id sent to the provider and accepted by {@link GenerateOptions.model}. */
   id: string
   /** Display name for selectors; defaults to the catalog name, then the id. */
@@ -722,7 +724,13 @@ function resolveModelReasoning(
   entry: PiAiModelProfile,
   base: Model<Api> | undefined,
 ): ModelReasoning {
-  const efforts = entry.reasoningEfforts
+  const declaredLevels = entry.lmStudio?.effortLevels
+  const imported = declaredLevels?.length
+    ? Object.fromEntries(THINKING_LEVELS.filter(level => declaredLevels.includes(level)).map(level => [level, level]))
+    : undefined
+  const efforts = entry.reasoningEfforts === undefined
+    ? (entry.lmStudio?.overrides?.effort === false ? false : imported)
+    : entry.reasoningEfforts
   if (efforts === undefined) {
     // Reasoning rides the installed entry or is absent: a bare capability flag
     // would make pi-ai advertise effort levels with no `thinkingLevelMap` to
@@ -928,7 +936,9 @@ export function resolveRouteModels(
     // discloses nothing but ids still yields a serviceable route. The fallback
     // is a guess by construction, which is why it is a configurable route field
     // rather than a constant buried here.
-    const contextWindow = entry.contextWindow ?? base?.contextWindow ?? request.defaultContextWindow
+    const metadata = entry.lmStudio
+    const contextWindow = metadata?.loadedContext ?? metadata?.maxContext
+      ?? entry.contextWindow ?? base?.contextWindow ?? request.defaultContextWindow
     if (!Number.isInteger(contextWindow) || contextWindow <= 0) {
       invalid(provider, `model "${entry.id}" contextWindow must be a positive integer`)
     }
@@ -939,6 +949,7 @@ export function resolveRouteModels(
     // Only a value the profile named is a deployment choice; the catalog's is
     // the model's capability and stays out of request defaults.
     if (entry.maxTokens !== undefined) configuredMaxTokens.set(entry.id, entry.maxTokens)
+    const fallbackInput = declaredInput(entry.input) ?? base?.input ?? [...request.defaultInput]
     return {
       // The installed entry lays the floor, and the fields below override it.
       // Enumerating instead would silently drop every `Model` field this
@@ -951,7 +962,11 @@ export function resolveRouteModels(
       api,
       provider,
       baseUrl,
-      input: declaredInput(entry.input) ?? base?.input ?? [...request.defaultInput],
+      input: metadata?.source
+        ? MODALITIES.filter(type => type === 'image'
+          ? metadata.overrides?.vision ?? metadata.vision ?? fallbackInput.includes('image')
+          : metadata.overrides?.text ?? metadata.text ?? fallbackInput.includes('text'))
+        : fallbackInput,
       cost: base?.cost ?? NO_COST,
       contextWindow,
       maxTokens,

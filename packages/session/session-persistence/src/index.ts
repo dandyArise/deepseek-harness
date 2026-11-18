@@ -208,6 +208,17 @@ export abstract class SessionPersistence extends Service {
    * @returns one snapshot per stored session.
    */
   abstract list(options?: SessionPersistenceListOptions): Promise<readonly SessionPersistenceSnapshot[]>
+
+  /** Permanently erase this session's durable history after its writer has closed. */
+  async delete(id: SessionId): Promise<void> {
+    const header = await this.deleteStoredLog(id)
+    await this.ctx.parallel('session/deleted', id, header)
+  }
+
+  /** Remove all generations, returning the removed header or undefined if already absent. */
+  protected deleteStoredLog(_id: SessionId): Promise<SessionHeader | undefined> {
+    return Promise.reject(new Error('This session storage backend does not support permanent deletion.'))
+  }
 }
 
 export default SessionPersistence

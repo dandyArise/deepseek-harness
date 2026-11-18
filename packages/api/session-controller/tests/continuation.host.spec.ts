@@ -17,19 +17,25 @@ function fold(events: readonly SessionEvent[]) {
 }
 const events = (reason: TurnEndReason) => turn(reason).map(entry => entry.event)
 
-it.each(['RATE_LIMIT', 'SERVER', 'TIMEOUT', 'TRANSPORT', 'EMPTY_RESPONSE', 'STREAM_CLOSED'])(
+it('offers continuation of the partial response after the output limit', () => {
+  const state = fold(events({ kind: 'max-tokens' }))
+  expect(state.truncated).toBe(true)
+  expect(definition.wire.view(state)).toBe(5)
+})
+
+it.each(['RATE_LIMIT', 'SERVER', 'TIMEOUT', 'TRANSPORT', 'EMPTY_RESPONSE', 'STREAM_CLOSED', 'CONTEXT_WINDOW_EXCEEDED'])(
   'offers a manual new turn after %s independently of automatic retries', (code) => {
     expect(definition.wire.view(fold(events(failed(code))))).toBe(5)
   },
 )
 it.each(['AUTH', 'QUOTA', 'ACCOUNT_QUOTA', 'MISSING_CREDENTIAL', 'INVALID_CREDENTIAL', 'UNKNOWN_MODEL',
-  'INVALID_REQUEST', 'CONTEXT_WINDOW_EXCEEDED', 'TOOL_ACTIVATION_FAILED', 'MALFORMED_RESPONSE', 'PI_AI_ERROR', 'UNKNOWN'])(
+  'INVALID_REQUEST', 'TOOL_ACTIVATION_FAILED', 'MALFORMED_RESPONSE', 'PI_AI_ERROR', 'UNKNOWN'])(
   'leaves %s to its own recovery action', (code) => {
     expect(definition.wire.view(fold(events(failed(code))))).toBeNull()
   },
 )
 it.each<TurnEndReason>([
-  { kind: 'completed' }, { kind: 'max-tokens' }, { kind: 'blocked' },
+  { kind: 'completed' }, { kind: 'blocked' },
   { kind: 'interrupted' }, { kind: 'forked' }, { kind: 'aborted', reason: { kind: 'user' } },
 ])('leaves a $kind turn unchanged', (reason) => {
   expect(definition.wire.view(fold(events(reason)))).toBeNull()
@@ -112,7 +118,7 @@ it('publishes a complete-log result independently of the visible page and releas
   expect(ctx.sessionProjections.snapshot(session).values.conversationContinuation).toBe(ending)
   expect(changed.mock.calls.map(([, key, value]) => [key, value])).toEqual([['conversationContinuation', null], ['conversationContinuation', ending]])
   expect(ctx.sessionProjections.checkpoint(session).conversationContinuation)
-    .toEqual({ ver: 4, seq: ending, val: { admitted: false, failedAttempt: false, ending } })
+    .toEqual({ ver: 5, seq: ending, val: { admitted: false, failedAttempt: false, ending } })
   session.append('turn/start', { turn: 2 })
   expect(ctx.sessionProjections.snapshot(session).values.conversationContinuation).toBeNull()
   expect(changed).toHaveBeenCalledTimes(3)
@@ -128,7 +134,7 @@ it('restores valid, absent and outdated checkpoints through the registry', async
   await ctx.sessionProjections.register(definition)
   const session = ctx.sessions.create(brandString<SessionId>('restored'))
   const log = events(failed('SERVER'))
-  const checkpoint = { conversationContinuation: { ver: 4, seq: SessionSeq(2), val: fold(log.slice(0, 3)) } }
+  const checkpoint = { conversationContinuation: { ver: 5, seq: SessionSeq(2), val: fold(log.slice(0, 3)) } }
   const restore = (rows: typeof checkpoint | Record<string, never>, tail: readonly SessionEvent[], base: number) =>
     ctx.sessionProjections.restore(rows, tail, SessionLogOffset(base), session.header, session.inheritedEventCount)
   expect(restore(checkpoint, log.slice(3), 3).snapshot.values.conversationContinuation).toBe(5)

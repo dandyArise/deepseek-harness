@@ -1064,9 +1064,10 @@ registerConfigurableProviders(entries: readonly LlmConfigurableProvider[]): Dire
  * Disposed with the fiber.
  * @param settingsNs - the namespace whose profiles this discovery serves.
  * @param discover - interrogates one endpoint and must honor the supplied signal.
+ * @param verify - optional owner of model-specific tool verification and verdict storage.
  * @returns the disposer that withdraws the offer.
  */
-registerModelDiscovery( settingsNs: string, discover: ( request: LlmModelDiscoveryRequest, signal?: AbortSignal, ) => Promise<readonly LlmDiscoveredModel[]>, ): () => void
+registerModelDiscovery( settingsNs: string, discover: ( request: LlmModelDiscoveryRequest, signal?: AbortSignal, ) => Promise<readonly LlmDiscoveredModel[]>, verify?: ModelVerifier, ): () => void
 
 /**
  * Interrogate one provider endpoint for the models it advertises. The
@@ -1089,6 +1090,16 @@ async discoverModels( settingsNs: string, request: LlmModelDiscoveryRequest, sig
  * @throws RemoteError with `llm/model-discovery-rejected` when discovery refuses or fails.
  */
 @Remote('discoverModels') async remoteDiscoverModels( settingsNs: string, request: LlmModelDiscoveryRequest, signal: AbortSignal, ): Promise<LlmDiscoveredModel[]>
+
+/**
+ * Run the selected route's tool probe and persist its protocol-specific result.
+ * @param provider - configured route owning the model.
+ * @param model - selected inference model identifier.
+ * @param protocol - wire protocol currently shown by the selector.
+ * @param signal - cancellation supplied by the Remote carrier.
+ * @returns the structured tool verdict and a diagnostic when unsuccessful.
+ */
+@Remote async verifyModel(provider: string, model: string, protocol: string, signal: AbortSignal): Promise<ModelVerificationResult>
 
 /**
  * Resolve the retry policy captured when one provider route was registered.

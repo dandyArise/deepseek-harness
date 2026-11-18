@@ -39,7 +39,7 @@ import type { Scoped } from '@deepseek-ai/dsh-scope'
 import { assertObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock, MessageId } from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { canonicalClientTimeZone } from '@deepseek-ai/dsh-util-time'
 import { Remote, RemoteError, TypertRemoteService, principalOf, type Principal } from '@deepseek-ai/dsh-typert-protocol'
 import {
@@ -72,6 +72,8 @@ import { listDescendants as listSubagentDescendants, resolveAgentPath } from './
 import type { SubagentDescendantListEntry } from './list-children.ts'
 import { subagentIdentityProjectionDefinition, subagentTimingProjectionDefinition } from './projection.ts'
 import { subagentCatalogProjectionDefinition } from './catalog.ts'
+import { subagentArchiveProjection, applySubagentArchiveLifecycle, updateSubagentArchive } from './popup-archive.ts'
+import type { SubagentArchiveUpdate, SubagentArchiveState } from './projection-types.ts'
 import { ROOT_AGENT_NAME } from './names.ts'
 
 export type {} from './catalog.ts'
@@ -211,9 +213,18 @@ export class SubagentRuntime extends TypertRemoteService {
     this.emitLifecycle = createLifecycleEmitter(this.ctx, parent => scopeTarget(this, parent))
   }
 
+  updateArchive(parent: Session, update: SubagentArchiveUpdate): Promise<SubagentArchiveState> {
+    return updateSubagentArchive(this.ctx, parent, update, id => this.manager?.hasActiveRun(id) ?? false)
+  }
+
   protected async [Service.init](): Promise<void> {
     const ctx = this.ctx
     const catalogProjection = await ctx.sessionProjections.register(subagentCatalogProjectionDefinition)
+    await ctx.sessionProjections.register(subagentArchiveProjection)
+    ctx.on('subagent/start', info => applySubagentArchiveLifecycle(ctx, info.parentSessionId, info.id, false))
+    ctx.on('subagent/end', (info) => {
+      if (info.local && info.stopReason === 'completed') applySubagentArchiveLifecycle(ctx, info.parentSessionId, info.id, true)
+    })
     await ctx.sessionProjections.register(subagentTimingProjectionDefinition)
     const identityProjection = await ctx.sessionProjections.register(subagentIdentityProjectionDefinition)
     if (ctx.fiber.uid === null) return

@@ -2,11 +2,42 @@
 /** Catalog reads preserve draft ownership and discard responses for a previous provider. */
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
-import { ModelListEditor } from '../src/client/ModelListEditor.tsx'
+import { ModelListEditor, type ModelDraft } from '../src/client/ModelListEditor.tsx'
 import type { ModelDiscoveryOutcome, ModelsOperations } from '../src/client/operations.ts'
 import { en } from '../src/client/locales.ts'
 
 afterEach(cleanup)
+
+it('imports LM Studio metadata once and keeps a vision correction across a second sync', async () => {
+  const lmStudio = { source: '/api/v1/models', vision: true, loadedContext: 8192, maxContext: 393216,
+    effort: true, effortLevels: ['low', 'medium', 'high', 'xhigh'] }
+  const discover = vi.fn<ModelsOperations['discoverModels']>()
+    .mockResolvedValueOnce({ kind: 'found', models: [{ id: 'local-model', lmStudio }, { id: 'local-model', lmStudio }] })
+    .mockResolvedValueOnce({ kind: 'found', models: [{ id: 'local-model', lmStudio: { ...lmStudio, loadedContext: 4096 } }] })
+  const onChange = vi.fn<(models: ModelDraft[]) => void>()
+  const props = { onChange, probe: { settingsNs: 'llm-pi-ai', provider: 'local', api: 'openai-completions' },
+    operations: operations(discover), disabled: false, t: (key: keyof typeof en) => en[key], onBusyChange: () => {} }
+  const view = render(<ModelListEditor {...props} models={[]} />)
+  async function sync() {
+    fireEvent.click(screen.getByRole('button', { name: en.fetchModels }))
+    const picker = await screen.findByRole('dialog')
+    expect(within(picker).getAllByRole('checkbox')).toHaveLength(1)
+    fireEvent.click(within(picker).getByRole('button', { name: en.fetchAdopt }))
+  }
+  await sync()
+  expect(onChange.mock.lastCall![0][0]?.lmStudio).toEqual(lmStudio)
+  view.rerender(<ModelListEditor {...props} models={onChange.mock.lastCall![0]} />)
+  fireEvent.click(screen.getByRole('button', { name: en.modelAdvanced + ' 1' }))
+  fireEvent.change(screen.getByRole('combobox', { name: new RegExp(en.lmVision) }), { target: { value: 'false' } })
+  const stored = JSON.parse(JSON.stringify(onChange.mock.lastCall![0])) as ModelDraft[]
+  // Older imports persisted the capability flag but omitted the offered levels.
+  Reflect.deleteProperty(stored[0]!.lmStudio as object, 'effortLevels')
+  view.rerender(<ModelListEditor {...props} models={stored} />)
+  await sync()
+  expect(onChange.mock.lastCall![0]).toEqual([{ id: 'local-model', lmStudio: {
+    ...lmStudio, loadedContext: 4096, overrides: { vision: false },
+  } }])
+})
 
 function operations(discoverModels: ModelsOperations['discoverModels']): ModelsOperations {
   return {

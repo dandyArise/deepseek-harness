@@ -198,6 +198,7 @@ class FakeWorkspaces implements IWorkspaces {
   declare readonly create: IWorkspaces['create']
   declare readonly rename: IWorkspaces['rename']
   declare readonly delete: IWorkspaces['delete']
+  readonly deleteSession = vi.fn<IWorkspaces['deleteSession']>(async () => {})
   declare readonly insertBefore: IWorkspaces['insertBefore']
   declare readonly insertSessionBefore: IWorkspaces['insertSessionBefore']
   readonly pinCalls: SessionId[] = []
@@ -1391,6 +1392,22 @@ describe('UiWorkspaceService', () => {
     expect(b.sessions.create).not.toHaveBeenCalled()
   })
 
+  it('clears the displayed conversation when another client deletes it', () => {
+    const b = bench()
+    b.uiWorkspace.openSession(sid('current'))
+    b.sessions.list.set(sessionState([summary('current')]))
+    b.sessions.list.set(sessionState())
+    expect(b.sessions.retained[0]!.release).toHaveBeenCalledOnce()
+    expect(b.selectPanel).toHaveBeenLastCalledWith(null)
+    expect(b.sessions.create).not.toHaveBeenCalled()
+  })
+
+  it('forgets a deleted saved conversation on startup', async () => {
+    const saved = persistSelection({ sessionId: sid('deleted') })
+    bench({ sessions: sessionState(), workspaces: workspaceState() })
+    await vi.waitFor(() => expect(JSON.parse(saved.get('dsh.sessions.current')!)).toEqual({}))
+  })
+
   it('does not let a pending startup Workspace replace a manual Session selection', async () => {
     const created = Promise.withResolvers<SessionId>()
     const b = bench({
@@ -1512,6 +1529,20 @@ describe('UiWorkspaceService', () => {
 
     expect(b.sessions.retained[0]!.release).toHaveBeenCalledOnce()
     expect(b.selectPanel).toHaveBeenCalledTimes(2)
+  })
+
+  it('releases the displayed history only after successful deletion of that session', async () => {
+    const b = bench()
+    const current = sid('current')
+    b.uiWorkspace.openSession(current)
+    const reference = b.sessions.retained[0]!
+    await b.uiWorkspace.deleteSession(sid('other'))
+    b.workspaces.deleteSession.mockRejectedValueOnce(new Error('busy'))
+    await expect(b.uiWorkspace.deleteSession(current)).rejects.toThrow('busy')
+    expect(reference.release).not.toHaveBeenCalled()
+    await b.uiWorkspace.deleteSession(current)
+    expect(reference.release).toHaveBeenCalledOnce()
+    expect(b.selectPanel).toHaveBeenLastCalledWith(null)
   })
 
   it('forwards archive commands and preserves failures', async () => {

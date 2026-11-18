@@ -4,7 +4,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { InboxState, InboxTarget } from '@deepseek-ai/dsh-agent/types'
 import { randomUUID } from '@deepseek-ai/dsh-util-crypto'
 import type { FileAttachmentRef, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
-import type { SubagentAddress } from '@deepseek-ai/dsh-subagent/client'
+import type { SubagentAddress, SubagentArchiveUpdate, SubagentArchiveState } from '@deepseek-ai/dsh-subagent/client'
 import type { MessageId } from '@deepseek-ai/dsh-llm/types'
 import type { UserMessage } from '@deepseek-ai/dsh-llm/types'
 import { SessionLogOffset, SessionSeq, type SessionId } from '@deepseek-ai/dsh-session/types'
@@ -401,6 +401,10 @@ export class Session implements SessionFace {
     const seq = SessionSeq(result.value.seq)
     this.projections.apply('title', result.value.title, seq)
     return { ok: true, value: { title: result.value.title, seq } }
+  }
+
+  updateSubagentArchive(update: SubagentArchiveUpdate): Promise<RemoteResult<SubagentArchiveState>> {
+    return this.remote.session.updateSubagentArchive({ sessionId: this.sessionId, update })
   }
 
   /**

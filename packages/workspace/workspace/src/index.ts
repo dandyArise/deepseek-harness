@@ -66,8 +66,8 @@ export class WorkspaceActiveSessionError extends Error {
    * @param sessionId - The active session id.
    * @param activity - The reported activity, in listener order.
    */
-  constructor(readonly sessionId: SessionId, readonly activity: readonly SessionActivity[]) {
-    super(`cannot archive session '${sessionId}': the session is active (${activity.map(entry => entry.kind).join(', ')})`)
+  constructor(readonly sessionId: SessionId, readonly activity: readonly SessionActivity[], verb: 'archive' | 'delete' = 'archive') {
+    super(`cannot ${verb} session '${sessionId}': the session is active (${activity.map(entry => entry.kind).join(', ')})`)
     this.name = 'WorkspaceActiveSessionError'
   }
 }
@@ -146,6 +146,8 @@ declare module '@deepseek-ai/cordis' {
      * @mode parallel
      */
     'workspace/session-stop'(request: SessionActivityRequest): Promise<void> | void
+    /** Release an idle live writer before permanently deleting its log. */
+    'workspace/session-deleting'(request: SessionActivityRequest): Promise<void> | void
     /**
      * Admit optional follow-up work after durable archival and any stop requests.
      * Dispatched inside the registry's write queue: a listener registers its work
@@ -317,15 +319,39 @@ export class WorkspaceRegistry extends Service {
   }
 
   /**
-   * Delete one workspace registration while retaining its directory and every
-   * session log. The durable order is updated before the table deletion; a
+   * Delete one workspace registration while retaining its directory. Session
+   * logs are retained unless deleteSessions is explicitly requested. The durable
+   * order is updated before the table deletion; a
    * failed table write restores the prior order and keeps the entity
    * published. Unknown ids are an idempotent no-op for domain callers.
    * @param id - Workspace registration to remove.
    * @returns `true` when a record was deleted, `false` when it was unknown.
    */
-  delete(id: WorkspaceId): Promise<boolean> {
-    return this.enqueueOperation(() => this.deleteKnown(id))
+  delete(id: WorkspaceId, options: { deleteSessions?: boolean } = {}): Promise<boolean> {
+    return this.enqueueOperation(async () => {
+      const workspace = this.entities.get(id)
+      if (workspace === undefined) return false
+      if (options.deleteSessions) {
+        const pending = new Set(workspace.sessionIds)
+        const headers = (await this.ctx.sessionPersistence.list()).map(row => row.header)
+        if (headers.some(header => header.parentSession !== undefined
+          && pending.has(header.parentSession) && !pending.has(header.id))) {
+          throw new Error('This workspace still has dependent sessions outside the group.')
+        }
+        const sessionIds: SessionId[] = []
+        // Delete dependent branches before their parent logs; detect cycles before writing.
+        while (pending.size) {
+          const parents = new Set(headers.filter(header => pending.has(header.id)).map(header => header.parentSession))
+          const leaves = [...pending].filter(id => !parents.has(id))
+          if (!leaves.length) throw new Error('Cyclic session dependencies prevent workspace deletion.')
+          for (const id of leaves) { sessionIds.push(id); pending.delete(id) }
+        }
+        // Refuse active work before deleting any conversation in the group.
+        for (const sessionId of sessionIds) await this.assertSessionDeletable(sessionId)
+        for (const sessionId of sessionIds) await this.deleteSessionData(sessionId)
+      }
+      return this.deleteKnown(id)
+    })
   }
 
   /**
@@ -406,6 +432,62 @@ export class WorkspaceRegistry extends Service {
         this.ctx.logger.warn('Session archived, but archive follow-up admission failed: %s', error)
       }
     })
+  }
+
+  /** Delete a confirmed conversation tree, children first, preserving project files. */
+  deleteSession(sessionId: SessionId): Promise<void> {
+    return this.enqueueOperation(async () => {
+      const children = new Map<SessionId, SessionId[]>()
+      for (const { header } of await this.ctx.sessionPersistence.list()) {
+        if (header.parentSession === undefined) continue
+        const siblings = children.get(header.parentSession) ?? []
+        siblings.push(header.id)
+        children.set(header.parentSession, siblings)
+      }
+      const ordered: SessionId[] = []
+      const visiting = new Set<SessionId>()
+      const visited = new Set<SessionId>()
+      const visit = (id: SessionId): void => {
+        if (visiting.has(id)) throw new Error('Cyclic session dependencies prevent deletion.')
+        if (visited.has(id)) return
+        visiting.add(id)
+        for (const child of children.get(id) ?? []) visit(child)
+        visiting.delete(id)
+        visited.add(id)
+        ordered.push(id)
+      }
+      visit(sessionId)
+      // Check every descendant before removing even the first log.
+      for (const id of ordered) await this.assertSessionDeletable(id)
+      // Closing the parent releases the idle child handles owned by its runtime.
+      for (const id of [...ordered].reverse()) await this.ctx.parallel('workspace/session-deleting', { sessionId: id })
+      for (const id of ordered) {
+        if (this.ctx.get('sessions')?.get(id)) throw new Error('Session is still open by another owner')
+      }
+      for (const id of ordered) await this.deleteSessionData(id)
+    })
+  }
+
+  private async assertSessionDeletable(sessionId: SessionId): Promise<void> {
+    const activity = await this.ctx.waterfall('workspace/session-activity', { sessionId }, () => Promise.resolve([]))
+    if (activity.length) throw new WorkspaceActiveSessionError(sessionId, activity, 'delete')
+  }
+
+  private async deleteSessionData(sessionId: SessionId): Promise<void> {
+    await this.assertSessionDeletable(sessionId)
+    await this.ctx.parallel('workspace/session-deleting', { sessionId })
+    if (this.ctx.get('sessions')?.get(sessionId)) throw new Error('Session is still open by another owner')
+    await this.ctx.sessionPersistence.delete(sessionId)
+    for (const workspace of this.entities.values()) await workspace.detachSession(sessionId)
+    const state = this.requireState()
+    if (state.archivedSessionIds.includes(sessionId) || state.pinnedSessionIds.includes(sessionId)) {
+      await this.setState({ ...state, archivedSessionIds: state.archivedSessionIds.filter(id => id !== sessionId),
+        pinnedSessionIds: state.pinnedSessionIds.filter(id => id !== sessionId) })
+    }
+    this.headers.delete(sessionId)
+    this.sessionPaths.delete(sessionId)
+    this.missingSessionPaths.delete(sessionId)
+    this.invalidSessionPaths.delete(sessionId)
   }
 
   /**

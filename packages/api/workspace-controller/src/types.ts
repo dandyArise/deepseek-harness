@@ -86,6 +86,8 @@ export interface WorkspaceValue {
 /** Workspace registration deletion. */
 export interface WorkspaceDeleteRequest {
   readonly workspaceId: WorkspaceId
+  /** Permanently delete the group's conversations after user confirmation. */
+  readonly deleteSessions?: boolean
 }
 
 /** Receipt after one Workspace registration is deleted. */
@@ -109,6 +111,11 @@ export interface WorkspaceInsertSessionBeforeRequest {
   readonly workspaceId: WorkspaceId
   readonly sessionId: SessionId
   readonly beforeSessionId?: SessionId
+}
+
+/** Permanently delete the specified Session and its stored history. */
+export interface WorkspaceDeleteSessionRequest {
+  readonly sessionId: SessionId
 }
 
 /** Session requested for archival from Workspace grouping surfaces. */

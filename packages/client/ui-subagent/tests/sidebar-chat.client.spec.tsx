@@ -110,6 +110,7 @@ describe('Sidebar chat registration', () => {
     expect(definition?.title('invalid')).toBe('Chat')
     expect(registrations.map(entry => entry.options.name)).toEqual([
       'sidebar.right.pane.tab',
+      'sidebar.right.pane.tab',
       'sidebar.chat.conversation',
     ])
 

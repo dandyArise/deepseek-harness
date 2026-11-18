@@ -19,6 +19,7 @@ import type {
   WorkspaceCreateRequest,
   WorkspaceCreateValue,
   WorkspaceDeleteRequest,
+  WorkspaceDeleteSessionRequest,
   WorkspaceDeleteValue,
   WorkspaceInsertBeforeRequest,
   WorkspaceInsertSessionBeforeRequest,
@@ -92,13 +93,14 @@ export class WorkspaceCommands {
   }
 
   /**
-   * Delete one Workspace registration without deleting its directory or Sessions.
+   * Delete one Workspace registration and optionally its Sessions, retaining its directory.
    * @param request - Workspace identity to remove.
    * @returns deletion confirmation.
    */
   delete(request: WorkspaceDeleteRequest): Promise<WorkspaceDeleteValue> {
     return this.enqueue(async () => {
-      if (!await this.ctx.workspaceRegistry.delete(brandString<WorkspaceId>(request.workspaceId))) {
+      if (!await this.ctx.workspaceRegistry.delete(brandString<WorkspaceId>(request.workspaceId),
+        { deleteSessions: request.deleteSessions === true })) {
         throw workspaceNotFound(request.workspaceId)
       }
       return { deleted: true }
@@ -150,6 +152,19 @@ export class WorkspaceCommands {
       )
     }
     return { workspace: workspaceView(workspace) }
+  }
+
+  async deleteSession(request: WorkspaceDeleteSessionRequest): Promise<WorkspaceDeleteValue> {
+    try {
+      await this.ctx.workspaceRegistry.deleteSession(request.sessionId)
+    } catch (error) {
+      if (error instanceof WorkspaceActiveSessionError) {
+        throw new RemoteError('workspace/session-active', error.message,
+          { sessionId: request.sessionId, activity: error.activity }, { cause: error })
+      }
+      throw new RemoteError('gateway/bad-request', errorMessage(error), {}, { cause: error })
+    }
+    return { deleted: true }
   }
 
   /**

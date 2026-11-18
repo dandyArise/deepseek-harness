@@ -2,6 +2,18 @@
 
 /** English strings (the key-set source of truth for this pair). */
 export const en = {
+  lmText: 'Text',
+  lmVision: 'Vision',
+  lmTools: 'Structured tool calls',
+  lmReasoning: 'Separate reasoning output',
+  lmEffort: 'Adjustable reasoning effort',
+  lmUnknown: 'Unknown',
+  lmYes: 'Yes',
+  lmNo: 'No',
+  lmManual: 'Manual',
+  lmDeclared: 'Declared',
+  lmMax: 'Maximum context',
+  lmLoaded: 'Loaded context',
   nav: 'Models',
   deepSeekAccount: 'DeepSeek Account',
   title: 'Models',
@@ -182,6 +194,18 @@ export type ModelsKey = keyof typeof en
 
 /** Chinese strings (same keys as {@link en}). */
 export const zh: { [Key in keyof typeof en]: string } = {
+  lmText: '文本',
+  lmVision: '视觉',
+  lmTools: '工具',
+  lmReasoning: '推理',
+  lmEffort: '强度',
+  lmUnknown: '未知',
+  lmYes: '是',
+  lmNo: '否',
+  lmManual: '手动',
+  lmDeclared: '声明',
+  lmMax: '最大上下文',
+  lmLoaded: '已加载上下文',
   nav: '模型',
   deepSeekAccount: 'DeepSeek 账号',
   title: '模型',
@@ -359,6 +383,18 @@ export const zh: { [Key in keyof typeof en]: string } = {
 
 /** Japanese copy, checked against the English keys. */
 export const ja = {
+  lmText: 'テキスト',
+  lmVision: '画像',
+  lmTools: 'ツール',
+  lmReasoning: '推論',
+  lmEffort: '強度',
+  lmUnknown: '不明',
+  lmYes: 'はい',
+  lmNo: 'いいえ',
+  lmManual: '手動',
+  lmDeclared: '申告値',
+  lmMax: '最大コンテキスト',
+  lmLoaded: '読み込み時の上限',
   'nav': 'モデル',
   'deepSeekAccount': 'DeepSeekアカウント',
   'title': 'モデル',
@@ -536,6 +572,18 @@ export const ja = {
 
 /** Spanish dictionary, checked against the English keys. */
 export const es = {
+  lmText: 'Texto',
+  lmVision: 'Visión',
+  lmTools: 'Herramientas',
+  lmReasoning: 'Razonamiento',
+  lmEffort: 'Esfuerzo',
+  lmUnknown: 'Desconocido',
+  lmYes: 'Sí',
+  lmNo: 'No',
+  lmManual: 'Manual',
+  lmDeclared: 'Declarado',
+  lmMax: 'Contexto máximo',
+  lmLoaded: 'Contexto cargado',
   nav: 'Modelos',
   deepSeekAccount: 'Cuenta DeepSeek',
   title: 'Modelos',
@@ -713,6 +761,18 @@ export const es = {
 
 /** French dictionary, checked against the English keys. */
 export const fr = {
+  lmText: 'Texte',
+  lmVision: 'Vision',
+  lmTools: 'Appels d’outils structurés',
+  lmReasoning: 'Raisonnement exposé séparément',
+  lmEffort: 'Effort de raisonnement réglable',
+  lmUnknown: 'Inconnu',
+  lmYes: 'Oui',
+  lmNo: 'Non',
+  lmManual: 'Manuel',
+  lmDeclared: 'Déclaré',
+  lmMax: 'Contexte maximal',
+  lmLoaded: 'Contexte chargé',
   nav: 'Modèles',
   deepSeekAccount: 'Compte DeepSeek',
   title: 'Modèles',
@@ -890,6 +950,18 @@ export const fr = {
 
 /** German dictionary, checked against the English keys. */
 export const de = {
+  lmText: 'Text',
+  lmVision: 'Bildeingabe',
+  lmTools: 'Werkzeuge',
+  lmReasoning: 'Denkprozess',
+  lmEffort: 'Denkaufwand',
+  lmUnknown: 'Unbekannt',
+  lmYes: 'Ja',
+  lmNo: 'Nein',
+  lmManual: 'Manuell',
+  lmDeclared: 'Angegeben',
+  lmMax: 'Maximaler Kontext',
+  lmLoaded: 'Geladener Kontext',
   nav: 'Modelle',
   deepSeekAccount: 'DeepSeek-Konto',
   title: 'Modelle',
@@ -1067,6 +1139,18 @@ export const de = {
 
 /** Russian dictionary, checked against the English keys. */
 export const ru = {
+  lmText: 'Текст',
+  lmVision: 'Зрение',
+  lmTools: 'Инструменты',
+  lmReasoning: 'Рассуждение',
+  lmEffort: 'Усилие',
+  lmUnknown: 'Неизвестно',
+  lmYes: 'Да',
+  lmNo: 'Нет',
+  lmManual: 'Вручную',
+  lmDeclared: 'Заявлено',
+  lmMax: 'Максимальный контекст',
+  lmLoaded: 'Загруженный контекст',
   nav: 'Модели',
   deepSeekAccount: 'DeepSeek Аккаунт',
   title: 'Модели',
@@ -1244,6 +1328,18 @@ export const ru = {
 
 /** Portuguese dictionary, checked against the English keys. */
 export const pt = {
+  lmText: 'Texto',
+  lmVision: 'Visão',
+  lmTools: 'Ferramentas',
+  lmReasoning: 'Raciocínio',
+  lmEffort: 'Esforço',
+  lmUnknown: 'Desconhecido',
+  lmYes: 'Sim',
+  lmNo: 'Não',
+  lmManual: 'Manual',
+  lmDeclared: 'Declarado',
+  lmMax: 'Contexto máximo',
+  lmLoaded: 'Contexto carregado',
   nav: 'Modelos',
   deepSeekAccount: 'DeepSeek Conta',
   title: 'Modelos',

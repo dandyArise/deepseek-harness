@@ -339,6 +339,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
  * a surface adopting one of these still owes the capacities its adapter needs.
  */
 export interface LlmDiscoveredModel {
+  lmStudio?: LmStudioModelMetadata
   /** Model id the endpoint accepts. */
   id: string
   /** Human-readable name when the endpoint supplies one. */
@@ -365,8 +366,35 @@ export interface LlmModelBadge {
   tone: LlmModelBadgeTone
 }
 
+/** Missing capability fields mean the provider did not disclose an answer. */
+export interface LmStudioCapabilities {
+  text?: boolean
+  vision?: boolean
+  tools?: boolean
+  reasoning?: boolean
+  effort?: boolean
+}
+
+/** Native discovery facts and durable user observations for one model. */
+export interface ModelVerificationResult {
+  status: 'verified' | 'failed' | 'blocked'
+  cause?: string
+}
+
+/** Catalog evidence, user corrections and protocol-specific probe results. */
+export interface LmStudioModelMetadata extends LmStudioCapabilities {
+  effortLevels?: string[]
+  source: string
+  maxContext?: number
+  loadedContext?: number
+  overrides?: LmStudioCapabilities
+  verification?: Record<string, ModelVerificationResult>
+}
+
 /** One adapter-discovered model; catalog membership is advisory, not request validation. */
 export interface LlmModelInfo {
+  protocol?: string
+  lmStudio?: LmStudioModelMetadata
   /** Provider route that owns this model entry. */
   provider: string
   /** Model id passed to {@link GenerateOptions.model}. */

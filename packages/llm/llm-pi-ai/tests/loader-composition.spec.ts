@@ -1,6 +1,6 @@
 /** Profile patch edits and credential updates reach the next real adapter request. */
 
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -90,6 +90,56 @@ async function loadComposition(): Promise<{ ctx: Context; settingsPath: string }
 }
 
 describe('llm-pi-ai real dormant composition', () => {
+  it.each([
+    { behavior: { events: [
+      JSON.stringify({ choices: [{ index: 0, delta: { role: 'assistant', content: '{"name":"lire_suivi","arguments":{}}' }, finish_reason: 'stop' }] }),
+      '[DONE]',
+    ] }, status: 'failed', cause: 'No matching structured tool call.' },
+    { behavior: { status: 400, body: JSON.stringify({ error: { message: 'Jinja: roles must alternate' } }) }, status: 'blocked', cause: 'roles must alternate' },
+  ])('records a $status tool verdict for the selected protocol', async ({ behavior, status, cause }) => {
+    const server = await mockServer([{ body: JSON.stringify({ models: [{ type: 'llm', key: 'sample' }] }) }, behavior])
+    const { ctx, settingsPath } = await loadComposition()
+    const protocol = 'openai-completions'
+    await ctx.settings.mutate('llm-pi-ai', [{ op: 'set', path: ['providers', 'local'], value: {
+      baseURL: server.url, api: protocol, apiKeyEnv: 'PI_COMPOSITION_KEY',
+      models: [{ id: 'sample', lmStudio: { source: '/api/v1/models' } }],
+    } }])
+    const result = await ctx.llm.verifyModel('local', 'sample', protocol, new AbortController().signal)
+    expect(result.status).toBe(status)
+    expect(result.cause).toContain(cause)
+    expect(await readFile(settingsPath, 'utf8')).toContain(status)
+  })
+
+  it.skipIf(!process.env.DEVSTRAL_MODEL || !process.env.LM_API_TOKEN)('imports the live LM Studio catalog and records a real tool verdict', async () => {
+    const { ctx, settingsPath } = await loadComposition()
+    const protocol = 'openai-completions'
+    const baseURL = 'http://127.0.0.1:1234/v1'
+    const model = process.env.DEVSTRAL_MODEL!
+    const discover = () => ctx.llm.discoverModels('llm-pi-ai', { provider: 'lmstudio', api: protocol, baseURL, apiKey: process.env.LM_API_TOKEN! })
+    const rows = await discover()
+    const row = rows.find(item => item.id === model)
+    expect(row?.lmStudio?.loadedContext).toBeGreaterThan(0)
+    await ctx.settings.mutate('llm-pi-ai', [{ op: 'set', path: ['providers', 'lmstudio'], value: {
+      baseURL, api: protocol, apiKeyEnv: 'LM_API_TOKEN', models: rows.map(item => ({ id: item.id, name: item.name, lmStudio: item.lmStudio })),
+    } }])
+    const info = await ctx.llm.resolveModelInfo('lmstudio', model)
+    expect(info.context?.contextWindow).toBe(row!.lmStudio!.loadedContext)
+    const result = await ctx.llm.verifyModel('lmstudio', model, protocol, new AbortController().signal)
+    expect(result).toEqual({ status: 'verified' })
+    const index = rows.findIndex(item => item.id === model)
+    const modelsPath = ['providers', 'lmstudio', 'models']
+    const correctedVision = !row!.lmStudio!.vision
+    await ctx.settings.mutate('llm-pi-ai', [{ op: 'set', path: [...modelsPath, String(index), 'lmStudio', 'overrides', 'vision'], value: correctedVision }])
+    const after = await ctx.llm.listModels('lmstudio')
+    expect(after).toHaveLength(new Set(rows.map(item => item.id)).size)
+    expect(after.find(item => item.id === model)?.lmStudio).toMatchObject({
+      overrides: { vision: correctedVision }, verification: { [protocol]: { status: 'verified' } },
+    })
+    const disk = await readFile(settingsPath, 'utf8')
+    expect(disk).toContain('verified')
+    expect(disk).toMatch(new RegExp('overrides:\\s+vision: ' + String(correctedVision)))
+  }, 130_000)
+
   it('dispatches header contributors through the Loader-mounted adapter', async () => {
     const server = await mockServer([{ events: textEvents }])
     const { ctx, settingsPath } = await loadComposition()

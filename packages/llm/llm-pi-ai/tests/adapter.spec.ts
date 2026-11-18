@@ -16,6 +16,7 @@ import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import { getBuiltinModels } from '@earendil-works/pi-ai/providers/all'
 import { DEFAULT_IMAGE_OFFLOAD_COUNT_QUANTUM, DEFAULT_MAX_REQUEST_IMAGE_BYTES, DEFAULT_MAX_REQUEST_IMAGES, resolveProfiles } from '../src/config.ts'
 import { memoryAuth } from './auth-double.ts'
+import * as localContext from '../src/lm-studio-context.ts'
 import { assemble } from './assemble.ts'
 import { anthropicTextEvents, closeMockServers, mockServer, textEvents } from './mock-server.ts'
 import { brandString } from '@deepseek-ai/dsh-brand'
@@ -114,6 +115,81 @@ beforeEach(() => {
 })
 
 describe('PiAiAdapter provider routing', () => {
+  it('uses the reloaded Devstral window for the continuation completion budget', async () => {
+    const model = 'devstral-small'
+    const nativeModels = (contextLength: number) => ({ body: JSON.stringify({ models: [{
+      key: model, type: 'llm', loaded_instances: [{ id: model, config: { context_length: contextLength } }],
+    }] }) })
+    const server = await mockServer([
+      nativeModels(8192), { events: textEvents }, nativeModels(32768), { events: textEvents },
+    ])
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    ctx.llm.registerAdapter(['lmstudio'], adapterOf({ lmstudio: {
+      baseURL: server.url + '/v1', api: 'openai-completions',
+      models: [{ id: model, contextWindow: 8192, maxTokens: 4096,
+        lmStudio: { source: '/api/v1/models', loadedContext: 8192 } }],
+    } }))
+    const history = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'context '.repeat(6000) }] })
+    const resume = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Continue.' }] })
+    await assemble(ctx, { provider: 'lmstudio', model, messages: [history] })
+    await assemble(ctx, { provider: 'lmstudio', model, messages: [history, resume] })
+    expect(server.paths).toEqual([
+      '/api/v1/models', '/v1/chat/completions', '/api/v1/models', '/v1/chat/completions',
+    ])
+    expect(server.requests[1]).toMatchObject({ max_completion_tokens: 1 })
+    expect(server.requests[3]).toMatchObject({ max_completion_tokens: 4096 })
+  })
+
+  it('reports the live Flint context after a reload without requiring a catalog sync', async () => {
+    const model = 'recursivesi/flint'
+    const native = (size: number) => ({ body: JSON.stringify({ models: [{
+      key: model, type: 'llm', max_context_length: 262144,
+      loaded_instances: [{ id: model, config: { context_length: size } }],
+    }] }) })
+    const server = await mockServer([native(8192), native(16384)])
+    const adapter = adapterOf({ lmstudio: { baseURL: server.url + '/v1', api: 'openai-completions',
+      models: [{ id: model, lmStudio: { source: '/api/v1/models', maxContext: 262144 } }],
+    } })
+    for (const size of [8192, 16384]) {
+      expect(await adapter.resolveModel('lmstudio', model)).toMatchObject({
+        context: { contextWindow: size }, lmStudio: { loadedContext: size, maxContext: 262144 },
+      })
+    }
+    expect(server.paths).toEqual(['/api/v1/models', '/api/v1/models'])
+  })
+
+  it.each([
+    { text: 'History', prompt: 12354, loaded: 8192, recovered: 16384, preflight: false },
+    { text: 'x '.repeat(18000), prompt: 18016, loaded: 16384, recovered: 32768, preflight: true },
+  ])('replays a rejected Flint prompt once with messages, tools and cap intact (preflight=$preflight)', async ({ text, prompt, loaded, recovered, preflight }) => {
+    const model = 'recursivesi/flint'
+    const body = { error: { type: 'exceed_context_size_error', n_prompt_tokens: prompt, n_ctx: loaded,
+      message: `request (${prompt} tokens) exceeds the available context size (${loaded} tokens)` } }
+    const server = await mockServer([
+      { body: JSON.stringify({ models: [{ key: model, type: 'llm', max_context_length: 262144,
+        loaded_instances: [{ id: model, config: { context_length: 8192 } }] }] }) },
+      { status: 400, body: JSON.stringify({ error: { message: JSON.stringify(body) } }) }, { events: textEvents },
+    ])
+    const resize = vi.spyOn(localContext, 'resizeLmStudioContext').mockResolvedValue(recovered)
+    if (preflight) resize.mockResolvedValueOnce(loaded)
+    const ctx = new Context()
+    try {
+      await ctx.plugin(LlmRuntime)
+      ctx.llm.registerAdapter(['lmstudio'], adapterOf({ lmstudio: { baseURL: server.url + '/v1', api: 'openai-completions',
+        models: [{ id: model, lmStudio: { source: '/api/v1/models', maxContext: 262144 } }],
+      } }))
+      const result = await assemble(ctx, { provider: 'lmstudio', model, maxTokens: 48, system: 'Keep all instructions.',
+        messages: [createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text }] })],
+        tools: [{ name: 'read', description: 'Read', parameters: { type: 'object', properties: {} } }] })
+      expect(result.finish).toMatchObject({ kind: 'stop' })
+      expect(resize).toHaveBeenCalledTimes(preflight ? 2 : 1)
+      expect(resize.mock.calls.at(-1)?.slice(1, 4)).toEqual([model, prompt + 48, 262144])
+      expect(server.requests).toHaveLength(3)
+      expect(server.requests[2]).toEqual(server.requests[1])
+    } finally { resize.mockRestore(); await ctx.fiber.dispose() }
+  })
+
   it('resolves a catalog model dynamically and uses a private endpoint', async () => {
     const server = await mockServer([{ events: textEvents }])
     const ctx = await harness(server.url)
@@ -753,6 +829,25 @@ describe('provider profile lifecycle', () => {
       failure: { code: 'UNSUPPORTED_REASONING_EFFORT' },
     })
     expect(server.requests).toHaveLength(1)
+  })
+
+  it('sends the selected imported LM Studio effort on the chat completions wire', async () => {
+    vi.stubEnv('PI_TEST_KEY', 'test-key')
+    const server = await mockServer([{ body: JSON.stringify({ models: [{ type: 'llm', key: 'sample' }] }) }, { events: textEvents }])
+    const ctx = new Context()
+    try {
+      await ctx.plugin(LlmRuntime)
+      await ctx.plugin(LlmPiAi, { providers: { local: {
+        apiKeyEnv: 'PI_TEST_KEY', api: 'openai-completions', baseURL: server.url,
+        models: [{ id: 'sample', lmStudio: { source: '/api/v1/models', effortLevels: ['low', 'high'] } }],
+      } } })
+      const info = await ctx.llm.resolveModelInfo('local', 'sample')
+      expect(info.reasoning?.efforts.map(level => level.id)).toEqual(['low', 'high'])
+      await assemble(ctx, { provider: 'local', model: 'sample', messages: [], reasoningEffort: brandString<ReasoningEffortId>('low') })
+      expect(server.requests.at(-1)).toMatchObject({ reasoning_effort: 'low' })
+    } finally {
+      await ctx.fiber.dispose()
+    }
   })
 
   it('dispatches the compat-switched dialect on a declared route', async () => {

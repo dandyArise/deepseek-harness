@@ -5,6 +5,7 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { SESSION_FORMAT_VERSION, SessionSeq } from '@deepseek-ai/dsh-session'
 import type { DatabaseSync } from 'node:sqlite'
 import { Context, Service, type Fiber } from '@deepseek-ai/cordis'
@@ -263,6 +264,25 @@ export class SqliteSessionQueryEngine extends SessionQueryEngine {
   /** Open eagerly only when activation owns the configured readiness boundary. */
   protected async [Service.init](): Promise<void> {
     if (this.config.openAt === 'startup') await this._ensureReady(undefined)
+    this.ctx.on('session/deleted', async (id) => {
+      if (this.config.openAt === 'never') return
+      await this._serialized(undefined, async () => {
+        if (!this._ready && !existsSync(this.config.path)) return
+        await this._ensureReady(undefined)
+        const db = this._requireDb()
+        db.exec('BEGIN IMMEDIATE')
+        try {
+          this._deleteSession('persisted', id)
+          this._deleteSession('live', id)
+          db.exec('UPDATE search_state SET global_generation = global_generation + 1 WHERE singleton = 1')
+          db.exec('COMMIT')
+        } catch (error) {
+          db.exec('ROLLBACK')
+          throw error
+        }
+        this._globalGeneration += 1
+      })
+    })
   }
 
   override async searchSessions(

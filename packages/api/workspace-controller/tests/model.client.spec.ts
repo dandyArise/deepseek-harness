@@ -69,6 +69,7 @@ function deferred<T>(): Deferred<T> {
 }
 
 class FakeWorkspaceRemote implements WorkspaceRemote {
+  readonly deleteSession = vi.fn<WorkspaceRemote['deleteSession']>(async () => remoteOk({ deleted: true }))
   readonly initializeDefault = vi.fn<WorkspaceRemote['initializeDefault']>(async () => remoteOk({ workspace: workspace('default') }))
   readonly calls: Array<{ readonly method: string; readonly request: unknown }> = []
   onCreate: (request: WorkspaceCreateRequest) => Promise<RemoteResult<WorkspaceCreateValue>> = request =>
@@ -564,7 +565,7 @@ describe('ClientWorkspaceModel', () => {
     const model = modelFor(remote)
     baseline(model, [workspace('gone')])
     await expect(model.delete(wid('gone'))).resolves.toMatchObject({ ok: true })
-    expect(remote.calls).toContainEqual({ method: 'delete', request: { workspaceId: 'gone' } })
+    expect(remote.calls).toContainEqual({ method: 'delete', request: { workspaceId: 'gone', deleteSessions: true } })
     expect(model.getSnapshot().items).toEqual([])
     model.removeView(wid('gone'))
     expect(model.getSnapshot().items).toEqual([])

@@ -4,19 +4,19 @@ import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { createUserMessage, LlmError } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import { expect, it, onTestFinished } from 'vitest'
-import { MockAdapter, textResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
+import { expect, it, onTestFinished, vi } from 'vitest'
+import { MockAdapter, maxTokensResponse, textResponse, toolCallResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import type { SessionPromptRequest, SessionRequestId } from '../src/types.ts'
 import { createSessionTestRemote } from './test-remote.ts'
 import { brandString } from '@deepseek-ai/dsh-brand'
 
-async function setup() {
+async function setup(script?: ConstructorParameters<typeof MockAdapter>[0]) {
   const ctx = new Context()
   onTestFinished(() => ctx.fiber.dispose())
   await mountAgentLoopTestDependencies(ctx)
   await ctx.plugin(AgentLoop, { agents: [] })
   const fail = (): never => { throw new LlmError('busy', 'SERVER') }
-  const adapter = new MockAdapter([fail, fail, textResponse('done')])
+  const adapter = new MockAdapter(script ?? [fail, fail, textResponse('done')])
   ctx.effect(() => ctx.llm.registerAdapter(['mock'], adapter))
   const remote = await createSessionTestRemote(ctx, { defaultModelSelection: () => ({ provider: 'mock', model: 'mock' }), cwd: '/workspace' })
   const agent = await ctx.agentLoop.create(brandString<SessionId>('empty-prompt'), { provider: 'mock', model: 'mock' })
@@ -25,6 +25,27 @@ async function setup() {
   })
   return { ctx, remote, agent, adapter, request }
 }
+
+it('continues truncated text once and leaves another truncation available for manual continuation', async () => {
+  const { agent, adapter, ctx } = await setup([maxTokensResponse('First part'), maxTokensResponse('Second part')])
+  agent.followup(createUserMessage({ content: [{ type: 'text', text: 'original task' }], source: { kind: 'user' } }))
+  await agent.whenIdle()
+  await vi.waitFor(() => expect(adapter.requests).toHaveLength(2))
+  await agent.whenIdle()
+  expect(adapter.requests[1]!.messages.at(-1)?.content).toEqual([{ type: 'text', text: 'Continue the previous response in its original language from where it stopped.' }])
+  expect(ctx.sessionProjections.snapshot(agent.session).values.conversationContinuation).not.toBeNull()
+})
+
+it.each([
+  ['without visible text', maxTokensResponse('   ')],
+  ['with a tool call', toolCallResponse('id', 'test', {}, 'partial').map(chunk =>
+    chunk.type === 'finish' ? { ...chunk, reason: { kind: 'max-tokens' as const } } : chunk)],
+] as const)('does not continue a truncation %s', async (_label, response) => {
+  const { agent, adapter } = await setup([response])
+  agent.followup(createUserMessage({ content: [{ type: 'text', text: 'original task' }], source: { kind: 'user' } }))
+  await agent.whenIdle()
+  expect(adapter.requests).toHaveLength(1)
+})
 
 it('records empty retry user messages without duplicate requests', async () => {
   const { remote, agent, adapter, request } = await setup()

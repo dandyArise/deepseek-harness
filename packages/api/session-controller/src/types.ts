@@ -7,8 +7,9 @@ import type {
 } from '@deepseek-ai/dsh-attachment'
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { LlmAttemptId, MessageId } from '@deepseek-ai/dsh-llm/types'
-import type { LlmModelBadge, TextBlock } from '@deepseek-ai/dsh-llm'
+import type { LlmModelBadge, LmStudioModelMetadata, TextBlock } from '@deepseek-ai/dsh-llm'
 import type { SessionId, SessionSeq, SessionSeqCursor } from '@deepseek-ai/dsh-session/types'
+import type { SubagentArchiveUpdate, SubagentArchiveState } from '@deepseek-ai/dsh-subagent/client'
 import type { SessionProjectionMap, SessionProjectionSummaryExcluded, SessionProjectionSummaryValues } from '@deepseek-ai/dsh-session-projection/types'
 import type { Principal } from '@deepseek-ai/dsh-typert-protocol'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
@@ -109,6 +110,8 @@ export interface ModelReasoning {
 
 /** One model displayed inside its provider group. */
 export interface ModelCatalogModel {
+  readonly protocol?: string
+  readonly lmStudio?: LmStudioModelMetadata
   readonly id: string
   readonly name: string
   readonly description?: string
@@ -684,11 +687,11 @@ declare module '@deepseek-ai/cordis' {
      */
     'api-session/added'(summary: SessionSummary): void
     /**
-     * A Session left the live Host registry.
+     * A Session left the live Host registry or was permanently deleted.
      * @mode emit
      * @param sessionId - removed Session identity.
      */
-    'api-session/removed'(sessionId: SessionId): void
+    'api-session/removed'(sessionId: SessionId, permanent?: boolean): void
     /**
      * One Agent changed running state.
      * @mode emit
@@ -718,3 +721,10 @@ export type SessionProjectionValue = JsonValue
 
 /** Application metadata returned by the serving desktop for one file. */
 export type SessionWorkspacePathApplication = NativeFileApplication
+
+export interface SessionSubagentArchiveRequest {
+  readonly sessionId: SessionId
+  readonly update: SubagentArchiveUpdate
+}
+
+export type SessionSubagentArchiveValue = SubagentArchiveState

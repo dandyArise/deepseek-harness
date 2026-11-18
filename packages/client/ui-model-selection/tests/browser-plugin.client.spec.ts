@@ -109,6 +109,7 @@ async function bench(locale: 'zh' | 'en' = 'zh') {
   }
   const remote = Object.assign(new TestRemote(ctx), { session: sessionRemote })
   ctx.reflect.provide('remote.session', sessionRemote)
+  ctx.reflect.provide('remote.llm', { verifyModel: () => Promise.resolve({ ok: true, value: { status: 'verified' } }) })
   const blocks = new Map<SessionId, { reason: string } | undefined>()
   ctx.provide('conversation', {
     blocks: {
@@ -207,6 +208,15 @@ async function bench(locale: 'zh' | 'en' = 'zh') {
 const projection = (id: string) => ({ sessionId: sid(id) })
 
 describe('ui-model-selection dual entry', () => {
+  it('refreshes the shared catalog after verifying a model on an unchanged route', async () => {
+    const b = await bench()
+    b.mint('verified')
+    const face = b.seat().inject!(sid('verified'))
+    const before = b.calls.models
+    await expect(face.verifyModel?.('deepseek-official', 'deepseek-v4-flash', 'openai-completions')).resolves.toEqual({ status: 'verified' })
+    expect(b.calls.models).toBeGreaterThan(before)
+  })
+
   it('carries writer contention to the model seat and localizes the command failure', async () => {
     const b = await bench()
     b.mint('owned')

@@ -14,6 +14,7 @@ import type { BuiltinLlmFailureCode, FinishReason, StreamChunk, TokenUsage, Tool
 import { isContextOverflow } from '@earendil-works/pi-ai/utils/overflow'
 import type { AssistantMessage, AssistantMessageEvent, Usage as PiUsage } from '@earendil-works/pi-ai'
 import { toPiReplayState } from './replay.ts'
+import { lmStudioOverflow } from './lm-studio-context.ts'
 
 /**
  * Map pi-ai usage (reasoning folded into output by pi-ai).
@@ -91,10 +92,15 @@ export function mapStopReason(message: AssistantMessage, contextWindow?: number)
     && message.errorMessage !== undefined
     && isContextWindowExceededError(message.errorMessage)
   if (piAiOverflow || harnessOverflow) {
+    let detail = message.errorMessage ?? `pi-ai detected context overflow for model "${message.model}"`
+    const overflow = lmStudioOverflow(detail)
+    if (overflow) {
+      detail = `LM Studio: the request needs ${overflow.prompt} input tokens; the loaded instance allows ${overflow.loaded}. Reload the model in LM Studio with room for both the prompt and the reply, then retry.\n${detail}`
+    }
     return {
       kind: 'error',
       failure: {
-        message: message.errorMessage ?? `pi-ai detected context overflow for model "${message.model}"`,
+        message: detail,
         code: CONTEXT_WINDOW_EXCEEDED_CODE,
       },
     }

@@ -95,6 +95,8 @@ export interface UiWorkspace {
    * @param options - `stopActivity` asks the Host to stop the Session's running work instead of refusing.
    */
   archiveSession(sessionId: SessionId, options?: { readonly stopActivity?: boolean }): Promise<void>
+  /** Release the displayed conversation after its deletion succeeds. */
+  deleteSession(sessionId: SessionId): Promise<void>
   /**
    * Unarchive a Session, restoring it to its recorded Workspace position.
    * @param sessionId - Session to unarchive.
@@ -388,6 +390,11 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     await this.workspaces.unarchiveSession(sessionId)
   }
 
+  async deleteSession(sessionId: SessionId): Promise<void> {
+    await this.workspaces.deleteSession(sessionId)
+    if (this.mainReference?.sessionId === sessionId) this.clearMain()
+  }
+
   async pinSession(sessionId: SessionId): Promise<void> {
     await this.workspaces.pinSession(sessionId)
     const { items, pinnedSessionIds, archivedSessionIds } = this.workspaces.list.getSnapshot()
@@ -430,12 +437,22 @@ class UiWorkspaceService extends Service implements UiWorkspace {
 
   private watchNavigation(): () => void {
     let initial: 'waiting' | 'connecting' | 'done' = 'waiting'
+    let observedCurrent: SessionId | undefined
     const reconcile = (): void => {
       if (this.lifetime.signal.aborted) return
       if (this.clearArchivedCurrent()) return
-      if (initial !== 'waiting' || this.restorationNavigation?.aborted === true) return
       const workspace = this.workspaces.list.getSnapshot()
       const sessions = this.sessions.list.getSnapshot()
+      const selected = this.selection.getSnapshot()
+      if (sessions.phase === 'ready' && selected.sessionId !== undefined && selected.subagentAddress === undefined) {
+        if (sessions.byId[selected.sessionId] !== undefined) observedCurrent = selected.sessionId
+        else if (observedCurrent === selected.sessionId) {
+          observedCurrent = undefined
+          this.clearMain()
+          return
+        }
+      }
+      if (initial !== 'waiting' || this.restorationNavigation?.aborted === true) return
       if (workspace.phase !== 'ready' || sessions.phase !== 'ready') return
       if (this.mainReference !== undefined) {
         initial = 'done'
@@ -469,6 +486,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
       return
     }
     const summary = saved.sessionId === undefined ? undefined : sessions.byId[saved.sessionId]
+    if (saved.sessionId !== undefined && summary === undefined) this.clearMain()
     const workspace = summary === undefined ? undefined
       : workspaces.items.find(item => item.sessionIds.includes(summary.id))
     if (summary !== undefined && (!summary.blank || workspace === undefined)) {

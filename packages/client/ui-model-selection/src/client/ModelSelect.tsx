@@ -73,7 +73,7 @@ interface EffortChoice {
  * @returns the trigger and, while open, the two-level menu.
  */
 export function ModelSelect(
-  { locked, available, directory, load, select, resolveText, t, renderSlot }:
+  { locked, available, directory, load, select, verifyModel, resolveText, t, renderSlot }:
   ModelSelectInjected & Pick<PropsRuntime<'conversation.input.model'>, 'locked'> & PropsLocale<'model'>
     & Omit<PropsRenderSlots<'conversation.input.model.label' | 'conversation.input.model.options' | 'conversation.input.model.pane'>, 'SessionProvider'>,
 ) {
@@ -84,6 +84,10 @@ export function ModelSelect(
   const [open, setOpen] = useState(false)
   const [pane, setPane] = useState<Pane>(ROOT_PANE)
   const [query, setQuery] = useState('')
+  const [visionOnly, setVisionOnly] = useState(false)
+  const [verifiedOnly, setVerifiedOnly] = useState(false)
+  const [verifying, setVerifying] = useState(false)
+  const [lastCheck, setLastCheck] = useState<{ provider: string; model: string; protocol: string; label: string }>()
   const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null)
   const [selectionFocus, setSelectionFocus] = useState(false)
   // The in-menu error strip serves catalog loads (its Retry re-runs the
@@ -125,12 +129,15 @@ export function ModelSelect(
       } satisfies ModelSelection,
     }))), [groups])
   const showSearch = choices.length > 4
+  const showFilters = choices.some(({ model }) => model.lmStudio !== undefined)
   const groupIndexes = useMemo(() => groups.map(group => ({
     group, index: new TextSearchIndex(group.models, model => ({ fuzzy: [model.name, model.id], substring: [model.description] })),
   })), [groups])
   const filteredGroups = useMemo(() => groupIndexes.map(({ group, index }) => ({
-    ...group, models: index.search(showSearch ? query : ''),
-  })).filter(group => group.models.length > 0), [groupIndexes, query, showSearch])
+    ...group, models: index.search(showSearch ? query : '').filter(model =>
+      (!visionOnly || (model.lmStudio?.overrides?.vision ?? model.lmStudio?.vision) === true)
+      && (!verifiedOnly || (model.protocol !== undefined && model.lmStudio?.verification?.[model.protocol]?.status === 'verified'))),
+  })).filter(group => group.models.length > 0), [groupIndexes, query, showSearch, visionOnly, verifiedOnly])
   const visibleModels = useMemo(() => filteredGroups.flatMap(group => group.models.map(model => ({
     provider: group.id, model: model.id,
   }))), [filteredGroups])
@@ -141,6 +148,21 @@ export function ModelSelect(
     ? -1
     : choices.findIndex(c => c.selection.provider === state.current?.provider && c.selection.model === state.current.model)
   const currentChoice = choices[selectedIndex]
+  const verifyCurrent = async (): Promise<void> => {
+    if (currentChoice?.model.protocol === undefined || verifyModel === undefined || verifying) return
+    const { provider, model } = currentChoice.selection
+    const protocol = currentChoice.model.protocol
+    setVerifying(true)
+    setLastCheck(undefined)
+    try {
+      const verdict = await verifyModel(provider, model, protocol)
+      setLastCheck({ provider, model, protocol, label: [t(verdict.status), verdict.cause].filter(Boolean).join(' · ') })
+    } catch (error) {
+      setLastCheck({ provider, model, protocol, label: t('blocked') + ' · ' + String(error) })
+    } finally {
+      setVerifying(false)
+    }
+  }
   const reasoning = currentChoice?.model.reasoning
   const effectiveEffort = state.current?.reasoningEffort ?? reasoning?.defaultEffort
   const effortLabel = currentChoice === undefined
@@ -249,6 +271,8 @@ export function ModelSelect(
     setSelectionFocus(false)
     triggerRef.current?.focus()
     setQuery('')
+    setVisionOnly(false)
+    setVerifiedOnly(false)
     setHighlightedIndex(null)
     if (currentChoice === undefined) paneFocus.current = 'drill'
     setPane(currentChoice === undefined ? MODEL_PANE : ROOT_PANE)
@@ -333,6 +357,9 @@ export function ModelSelect(
       }
       return
     }
+    if (pane.kind === 'model' && showFilters && event.key === 'Tab' && !event.shiftKey
+      && event.target === searchRef.current) return
+    if (pane.kind === 'model' && event.target instanceof HTMLInputElement && event.target.type === 'checkbox') return
     if (pane.kind === 'model' && showSearch && event.target instanceof HTMLInputElement
       && (event.key === 'Enter' || (event.key === 'Tab' && !event.shiftKey))) {
       if (event.key === 'Tab' && visibleModels.length === 0) return
@@ -468,6 +495,25 @@ export function ModelSelect(
       })}
     </span>
   )
+  const renderCapabilities = (model: ModelLabelOwner['model']) => {
+    const metadata = model.lmStudio
+    if (metadata === undefined) return null
+    const verdict = model.protocol === undefined ? undefined : metadata.verification?.[model.protocol]
+    const context = metadata.loadedContext ?? metadata.maxContext
+    return <small className={css.capabilities}>
+      {(['text', 'vision', 'tools', 'reasoning', 'effort'] as const).map((field) => {
+        const override = metadata.overrides?.[field]
+        const effective = override ?? metadata[field]
+        const value = t(effective === undefined ? 'unknown' : effective ? 'yes' : 'no')
+        const description = [t(field), value, override === undefined ? metadata.source : t('manual')].join(' · ')
+        return <span key={field} title={description} aria-label={description}>
+          {t(field)} {effective === undefined ? '?' : effective ? '✓' : '−'}
+        </span>
+      })}
+      {verdict !== undefined && <span title={verdict.cause}>{t(verdict.status)}</span>}
+      {context !== undefined && <span>{t(metadata.loadedContext === undefined ? 'maxContext' : 'loadedContext')} {context.toLocaleString()}</span>}
+    </small>
+  }
   let itemIndex = 0
   let modelIndex = 0
   const itemRef = () => {
@@ -550,7 +596,19 @@ export function ModelSelect(
                   <IconChevronRightOutlineRegular className={css.cellChevron} />
                 </button>
               )}
+              {reasoning === undefined && currentChoice?.model.lmStudio && (
+                <div className={css.cell}>
+                  <span className={css.cellLabel}>{t('menu.effort')}</span>
+                  <span className={css.cellValue}>{t(currentChoice.model.lmStudio.effort === false ? 'no' : 'unknown')}</span>
+                </div>
+              )}
               {renderSlot('conversation.input.model.options', { ...controls, openPane: (pane) => { drill({ kind: 'detail', pane }) } })}
+              {currentChoice?.model.lmStudio !== undefined && currentChoice.model.protocol !== undefined && verifyModel !== undefined && <>
+                <button ref={itemRef()} type="button" role="menuitem" className={css.cell} disabled={busy || verifying}
+                  onClick={() => { void verifyCurrent() }}>{t(verifying ? 'verifying' : 'verifyModel')}</button>
+                {lastCheck?.provider === currentChoice.group.id && lastCheck.model === currentChoice.model.id
+                  && lastCheck.protocol === currentChoice.model.protocol && <div role="status" className={css.status}>{lastCheck.label}</div>}
+              </>}
             </>
           )}
 
@@ -584,6 +642,16 @@ export function ModelSelect(
                     <IconCloseFillRegular />
                   </button>
                 )}
+              </div>}
+              {showFilters && <div className={css.capabilityFilters}>
+                <label><input type="checkbox" checked={visionOnly} onChange={(event) => {
+                  setVisionOnly(event.target.checked)
+                  setHighlightedIndex(0)
+                }} />{t('vision')}</label>
+                <label><input type="checkbox" checked={verifiedOnly} onChange={(event) => {
+                  setVerifiedOnly(event.target.checked)
+                  setHighlightedIndex(0)
+                }} />{t('verifiedTools')}</label>
               </div>}
               {state.status === 'loading' && (
                 <div className={css.status}>{t('status.loading')}</div>
@@ -638,6 +706,7 @@ export function ModelSelect(
                           >
                             <span className={css.optionCopy}>
                               <span className={css.modelName}>{renderModelLabel(group.provider, model, 'option', selected)}</span>
+                              {renderCapabilities(model)}
                             </span>
                             <span className={css.check}>
                               {pending?.provider === group.id && pending.model === model.id

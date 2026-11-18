@@ -104,6 +104,7 @@ export const VIEWER_ENDPOINT_CLASSES = {
   'session/search': 'owner-only', // owner searches across Sessions
   'session/selectModel': 'owner-only', // owner selects a Session model
   'session/updateQueue': 'owner-only', // owner edits queued input
+  'session/updateSubagentArchive': 'owner-only', // owner manages child archive visibility
   'session/workspacePathApplications': 'owner-only', // owner applies a Workspace path
   'sessionStatus/follow': 'owner-only', // owner reading reminders
   'sessionStatus/mark': 'owner-only', // owner reading reminders
@@ -136,6 +137,7 @@ export const VIEWER_ENDPOINT_CLASSES = {
   'workspace/pinSession': 'owner-only', // owner pins a Session
   'workspace/rename': 'owner-only', // owner renames a Workspace
   'workspace/unarchiveSession': 'owner-only', // owner unarchives a Session
+  'workspace/deleteSession': 'owner-only', // permanently removes Session history
   'workspace/unpinSession': 'owner-only', // owner unpins a Session
   'workspaceFiles/changes': 'owner-only', // owner Workspace file access
   'workspaceFiles/list': 'owner-only', // owner Workspace file access'
@@ -219,6 +221,7 @@ export const VIEWER_ENDPOINT_CLASSES = {
   'userQuestions/answer': 'owner-only', // owner answers a pending question
   'userQuestions/attachWait': 'owner-only', // owner answers a pending question
   'llm/discoverModels': 'owner-only', // owner discovers models
+  'llm/verifyModel': 'owner-only', // owner runs inference and records the result
   'web/listProviders': 'owner-only', // owner web search and fetch settings
   'agentPresets/list': 'owner-only', // owner agent presets
   'agentPresets/read': 'owner-only', // owner agent presets

@@ -115,6 +115,20 @@ async function waitNoActivation(ctx: Context, childId: SessionId): Promise<void>
 }
 
 describe('dsh-tool-subagent-control', () => {
+  it('exposes an archive tool and archives only the calling parent’s completed children', async () => {
+    const { ctx, parent } = await setup([textResponse('finished')])
+    expect(ctx.tools.schemas().filter(schema => schema.name === 'archive_completed_agents')).toHaveLength(1)
+    const child = await ctx.subagents.startActivation({
+      delivery: 'parent', provider: 'spawn', label: 'archive test', parent,
+      prompt: [{ type: 'text', text: 'finish' }], signal: testToolSignal,
+    })
+    await waitNoActivation(ctx, child.childId)
+    const other = await ctx.agentLoop.create(brandString<SessionId>('other'), { provider: 'mock', model: 'mock' })
+    expect(text(await callTool(ctx, 'archive_completed_agents', {}, other))).toContain('archived direct subagents: 0')
+    expect(text(await callTool(ctx, 'archive_completed_agents', {}, parent))).toContain('archived direct subagents: 1')
+    expect(text(await callTool(ctx, 'archive_completed_agents', {}, parent))).toContain('archived direct subagents: 1')
+  })
+
   it('registers send_message once, globally, with the two required parameters', async () => {
     const { ctx } = await setup([])
     const schemas = ctx.tools.schemas().filter(schema => schema.name === 'send_message')
@@ -484,7 +498,7 @@ describe('dsh-tool-subagent-control', () => {
     })
     const communication = async () => renderContextSnapshot(await ctx.systemPrompt.assemble({ agent: child, scope: child }))
     expect(await communication()).toContain('You are a subagent delegated by agent')
-    const names = ['send_message', 'list_agents', 'wait_agent']
+    const names = ['send_message', 'list_agents', 'wait_agent', 'archive_completed_agents']
     if (config.interrupt !== false) names.push('interrupt_agent')
     for (const name of names) expect(ctx.tools.schemas().filter(schema => schema.name === name)).toHaveLength(1)
     expect(ctx.tools.get('list_agents')?.description).not.toContain('interrupt')
@@ -498,7 +512,7 @@ describe('dsh-tool-subagent-control', () => {
     expect(await communication()).not.toContain('You are a subagent delegated by agent')
     const reloaded = await ctx.plugin(tool)
     expect(await communication()).toContain('You are a subagent delegated by agent')
-    for (const name of ['send_message', 'interrupt_agent', 'list_agents', 'wait_agent']) {
+    for (const name of ['send_message', 'interrupt_agent', 'list_agents', 'wait_agent', 'archive_completed_agents']) {
       expect(ctx.tools.schemas().filter(schema => schema.name === name)).toHaveLength(1)
     }
     await reloaded.dispose()

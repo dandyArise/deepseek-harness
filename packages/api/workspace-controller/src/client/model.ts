@@ -10,6 +10,7 @@ import type {
   WorkspaceBaseline,
   WorkspaceCreateRequest,
   WorkspaceCreateValue,
+  WorkspaceDeleteSessionRequest,
   WorkspaceDeleteValue,
   WorkspaceInsertSessionBeforeRequest,
   WorkspaceOrderValue,
@@ -130,7 +131,7 @@ export class ClientWorkspaceModel implements WorkspaceFollowSink {
    * @returns generated Remote result.
    */
   async delete(workspaceId: WorkspaceId): Promise<RemoteResult<WorkspaceDeleteValue>> {
-    const result = await this.remote.delete({ workspaceId })
+    const result = await this.remote.delete({ workspaceId, deleteSessions: true })
     if (result.ok) this.remove(workspaceId, true)
     return result
   }
@@ -179,6 +180,10 @@ export class ClientWorkspaceModel implements WorkspaceFollowSink {
     })
     if (result.ok) this.upsert(result.value.workspace)
     return result
+  }
+
+  deleteSession(sessionId: WorkspaceDeleteSessionRequest['sessionId']): Promise<RemoteResult<WorkspaceDeleteValue>> {
+    return this.remote.deleteSession({ sessionId })
   }
 
   /**

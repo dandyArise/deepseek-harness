@@ -417,8 +417,12 @@
 }
 
 /* Solid artwork uses a smaller footprint than the thin send arrow. */
-.continueIcon {
-  transform: scale(1.5);
+.primary[data-continue] {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: auto;
+  padding-inline: 10px;
 }
 
 @media (hover: hover) {

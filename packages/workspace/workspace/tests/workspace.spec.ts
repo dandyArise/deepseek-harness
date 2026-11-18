@@ -57,7 +57,8 @@ async function harness(options: HarnessOptions = {}) {
     listed.map(header => ({ header, revision: brandString<SessionPersistenceRevision>(`rev-${header.id}`) })))
   const open = vi.fn(() => { throw new Error('event bodies must not be opened') })
   const stat = vi.fn(() => { throw new Error('per-session stat must not be needed') })
-  ctx.provide('sessionPersistence', { list, open, stat } as never)
+  const deleteLog = vi.fn(async (id: SessionId) => { listed = listed.filter(row => row.id !== id) })
+  ctx.provide('sessionPersistence', { list, open, stat, delete: deleteLog } as never)
 
   if (options.sessionStore === true) {
     await ctx.plugin(SessionStore)
@@ -84,6 +85,7 @@ async function harness(options: HarnessOptions = {}) {
     list,
     open,
     stat,
+    deleteLog,
     setSessions: (headers: SessionHeader[]) => { listed = headers },
   }
 }
@@ -511,6 +513,76 @@ describe('WorkspaceRegistry create and lookup', () => {
     expect(storedState(pool)).toMatchObject({
       pendingMutation: { operation: 'create' },
     })
+  })
+
+  it('deletes confirmed group conversations while preserving other groups and project files', async () => {
+    const dir = await makeDir('delete-conversations')
+    const other = await makeDir('other-conversations')
+    const result = await harness({ sessions: [header('first', dir), header('second', dir), header('outside', other)] })
+    const workspace = await result.registry.create(dir)
+    const outside = await result.registry.create(other)
+    await expect(result.registry.delete(workspace.id, { deleteSessions: true })).resolves.toBe(true)
+    expect(result.deleteLog.mock.calls.map(([id]) => id)).toEqual(['first', 'second'])
+    expect(result.registry.get(workspace.id)).toBeUndefined()
+    expect(result.registry.get(outside.id)).toBeDefined()
+    await expect(realpath(dir)).resolves.toBe(dir)
+  })
+
+  it('deletes a session with nested descendants without deleting unrelated sessions', async () => {
+    const dir = await makeDir('delete-session-tree')
+    const parent = header('parent', dir)
+    const child = { ...header('child', dir), parentSession: parent.id }
+    const grandchild = { ...header('grandchild', dir), parentSession: child.id }
+    const result = await harness({ sessions: [parent, child, grandchild, header('unrelated', dir)] })
+    await result.registry.deleteSession(parent.id)
+    expect(result.deleteLog.mock.calls.map(([id]) => id)).toEqual(['grandchild', 'child', 'parent'])
+    await expect(realpath(dir)).resolves.toBe(dir)
+  })
+
+  it('refuses session tree deletion before writing if a descendant is active', async () => {
+    const dir = await makeDir('delete-session-active')
+    const parent = header('parent', dir)
+    const child = { ...header('child', dir), parentSession: parent.id }
+    const result = await harness({ sessions: [parent, child] })
+    result.ctx.on('workspace/session-activity', async ({ sessionId }, next) =>
+      sessionId === child.id ? [{ kind: 'probe' }] : next())
+    await expect(result.registry.deleteSession(parent.id)).rejects.toMatchObject({ sessionId: child.id })
+    expect(result.deleteLog).not.toHaveBeenCalled()
+  })
+
+  it('deletes dependent conversations before their parent', async () => {
+    const dir = await makeDir('delete-dependent')
+    const parent = header('parent', dir)
+    const child = { ...header('child', dir), parentSession: parent.id }
+    const result = await harness({ sessions: [parent, child] })
+    const workspace = await result.registry.create(dir)
+    await result.registry.delete(workspace.id, { deleteSessions: true })
+    expect(result.deleteLog.mock.calls.map(([id]) => id)).toEqual(['child', 'parent'])
+  })
+
+  it('refuses the whole group before deleting anything when a conversation is active', async () => {
+    const dir = await makeDir('delete-active')
+    const result = await harness({ sessions: [header('quiet', dir), header('busy', dir)] })
+    const workspace = await result.registry.create(dir)
+    result.ctx.on('workspace/session-activity', async ({ sessionId }, next) => {
+      const rest = await next()
+      return sessionId === 'busy' ? [{ kind: 'probe' }, ...rest] : rest
+    })
+    await expect(result.registry.delete(workspace.id, { deleteSessions: true })).rejects.toMatchObject({
+      name: 'WorkspaceActiveSessionError', sessionId: 'busy',
+    })
+    expect(result.deleteLog).not.toHaveBeenCalled()
+    expect(result.registry.get(workspace.id)).toBeDefined()
+  })
+
+  it('keeps the workspace available for retry after a conversation deletion fails', async () => {
+    const dir = await makeDir('delete-retry')
+    const result = await harness({ sessions: [header('first', dir), header('second', dir)] })
+    const workspace = await result.registry.create(dir)
+    result.deleteLog.mockRejectedValueOnce(new Error('disk busy'))
+    await expect(result.registry.delete(workspace.id, { deleteSessions: true })).rejects.toThrow('disk busy')
+    expect(result.registry.get(workspace.id)).toBeDefined()
+    await expect(result.registry.delete(workspace.id, { deleteSessions: true })).resolves.toBe(true)
   })
 
   it('deletes only the registration and leaves its directory and session headers untouched', async () => {

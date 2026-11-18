@@ -146,6 +146,7 @@ function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
     notifyArchivedNotOpenable: vi.fn(),
     renameWorkspace: vi.fn(async () => {}),
     deleteWorkspace: vi.fn(async () => {}),
+    deleteSession: vi.fn(async () => {}),
     unarchiveSession: vi.fn(async () => {}),
     insertWorkspaceBefore: vi.fn(async () => {}),
     createWorkspace: vi.fn(async () => workspace('created', [])),
@@ -157,7 +158,7 @@ function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
     ...overrides,
   }
   const view = render(<WorkspaceBrowser {...props} />)
-  return { view, props, store, controls, openDialog: (workspaceId: WorkspaceId, displayTitle: string, action: 'rename' | 'delete') => {
+  return { view, props, store, controls, request, openDialog: (workspaceId: WorkspaceId, displayTitle: string, action: 'rename' | 'delete') => {
     const storedTitle = props.useWorkspaces(state => state.items.find(row => row.workspaceId === workspaceId)?.title ?? displayTitle)
     act(() => { request.set({ action, workspaceId, displayTitle, storedTitle }) })
   } }
@@ -170,6 +171,25 @@ function rerender(b: ReturnType<typeof mount>, overrides: Partial<WorkspaceBrows
 }
 
 describe('WorkspaceBrowser', () => {
+  it('confirms the named session before deleting it and keeps a failed deletion retryable', async () => {
+    const deleteSession = vi.fn().mockRejectedValueOnce(new Error('Session is busy')).mockResolvedValueOnce(undefined)
+    const b = mount({ deleteSession })
+    const target = { action: 'deleteSession' as const, sessionId: sid('temporary'), displayTitle: 'Temporary session' }
+    const open = () => act(() => { b.request.set(target) })
+    const confirm = () => fireEvent.click(screen.getByRole('button', { name: t('delete.session') }))
+    open()
+    expect(screen.getByRole('dialog').textContent).toContain('Temporary session')
+    fireEvent.click(screen.getByRole('button', { name: t('cancel') }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(deleteSession).not.toHaveBeenCalled()
+    open()
+    confirm()
+    expect((await screen.findByRole('alert')).textContent).toBe('Session is busy')
+    confirm()
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(deleteSession.mock.calls).toEqual([[target.sessionId], [target.sessionId]])
+  })
+
   it.each(['workspace', 'flat', 'ungrouped'] as const)('passes the standard menu factory through the %s list', (mode) => {
     const preferences = createWorkspaceViewStore().create()
     preferences.actions.setGroupBy(mode === 'flat' ? 'flat' : 'workspace')

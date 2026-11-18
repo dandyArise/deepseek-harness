@@ -64,12 +64,16 @@ declare module '@deepseek-ai/dsh-client-ui-context-menu/client' {
   }
 }
 
-/** One request for the existing Workspace rename or delete dialog. */
+/** Captured target for a sidebar rename or deletion confirmation. */
 export type WorkspaceActionRequest = {
   readonly action: 'rename' | 'delete'
   readonly workspaceId: WorkspaceId
   readonly displayTitle: string
   readonly storedTitle: string
+} | {
+  readonly action: 'deleteSession'
+  readonly sessionId: SessionId
+  readonly displayTitle: string
 }
 
 /**
@@ -320,6 +324,7 @@ export type WorkspaceBrowserInjected = {
   renameWorkspace: (workspaceId: WorkspaceId, title: string) => Promise<void>
   /** Delete only a Host Workspace registration; directory and Session logs remain. */
   deleteWorkspace: (workspaceId: WorkspaceId) => Promise<void>
+  deleteSession: (sessionId: SessionId) => Promise<void>
   /**
    * Reorder a Workspace in the durable registry display order.
    * Omitted anchor appends to the end.

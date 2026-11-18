@@ -1040,7 +1040,7 @@ export const fr = {
   'message.failure.quota': 'Quota de demandes épuisé.',
   'message.turnError': 'Ce tour a échoué',
   'message.maxTokens': 'Limite de jetons de sortie atteinte',
-  'message.maxTokens.hint': 'La réponse fut coupée ; la sortie antérieure est conservée dans la conversation. Envoyez « continuer » pour laisser le modèle reprendre.',
+  'message.maxTokens.hint': 'La réponse est conservée. Cliquez sur « Continuer la génération » pour reprendre là où le modèle s’est arrêté.',
   'message.tokensPerSecond': '{tps} jetons/s',
   'message.turnUsage.title': 'Consommation du tour',
   'message.turnUsage.consumed': 'Utilisation {total}',

@@ -1036,3 +1036,11 @@ describe('toStreamChunks defensive branches', () => {
     expect(chunks[0]).toEqual({ type: 'tool-call-delta', index: 0, id: '', argumentsDelta: '{}' })
   })
 })
+// LM Studio rejects input larger than the active instance even when the model's catalog window is larger.
+it('reports the loaded limit and keeps the provider diagnostic for a 12354-token prompt', () => {
+  const errorMessage = 'Engine protocol predict request returned 400: {"error":{"message":"request (12354 tokens) exceeds the available context size (8192 tokens)","type":"exceed_context_size_error","n_prompt_tokens":12354,"n_ctx":8192}}'
+  expect(mapStopReason(assistant({ stopReason: 'error', errorMessage }))).toMatchObject({
+    kind: 'error',
+    failure: { code: CONTEXT_WINDOW_EXCEEDED_CODE, message: expect.stringContaining('12354 input tokens; the loaded instance allows 8192') },
+  })
+})
