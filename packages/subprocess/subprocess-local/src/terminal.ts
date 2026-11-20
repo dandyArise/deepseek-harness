@@ -57,7 +57,7 @@ function signalName(number: number | undefined): NodeJS.Signals | null {
  * the tracking a remote provider needs.
  */
 export class LocalTerminalHandle implements SubprocessTerminalHandle {
-  readonly pid: number
+  get pid(): number { return this.terminal.pid }
   readonly output = new PassThrough()
   readonly done: Promise<SubprocessOutcome>
 
@@ -74,7 +74,8 @@ export class LocalTerminalHandle implements SubprocessTerminalHandle {
   private quiescent = false
   private managedRangeEmpty = false
   /** The spawned shell's start identity; scans stop adopting members once the root pid no longer carries it. */
-  private readonly rootIdentity: ProcessIdentity | undefined
+  private rootIdentity: ProcessIdentity | undefined
+  private pendingRootIdentity = false
 
   /**
    * @param terminal - allocated node-pty process.
@@ -93,7 +94,7 @@ export class LocalTerminalHandle implements SubprocessTerminalHandle {
     private readonly onQuiescence?: () => void,
     private readonly observeShellExit = false,
   ) {
-    this.pid = terminal.pid
+    this.pendingRootIdentity = terminal.pid === 0
     try { this.rootIdentity = inspector.snapshot().tree(this.pid).find(member => member.pid === this.pid) }
     catch (_rootIdentityUnavailable) { this.rootIdentity = undefined }
     this.done = this.outcome.promise
@@ -105,6 +106,13 @@ export class LocalTerminalHandle implements SubprocessTerminalHandle {
     this.output.on('drain', resume)
     this.output.once('close', () => { this.output.off('drain', resume) })
     this.dataDisposable = terminal.onData((data) => {
+      // ConPTY publishes its real PID asynchronously, before the first data.
+      // Capture once: never adopt a replacement process after the shell exits.
+      if (this.pendingRootIdentity && terminal.pid > 0 && !this.exited) {
+        this.pendingRootIdentity = false
+        try { this.rootIdentity = inspector.snapshot().tree(terminal.pid).find(member => member.pid === terminal.pid) }
+        catch (_rootIdentityUnavailable) { this.rootIdentity = undefined }
+      }
       if (!this.output.write(Buffer.from(data, 'utf8')) && this.cleanup === undefined && !this.outputPaused) {
         this.outputPaused = true
         terminal.pause()
