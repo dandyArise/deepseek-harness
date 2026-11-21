@@ -1,0 +1,29 @@
+- insert:
+    - id: preset-discussion
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: discussion
+        name: Discussion libre
+        description: Conversation sans espace de travail, outils de fichiers ni terminal.
+        order: 0
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: >-
+                You are a helpful conversational assistant. Answer the user's latest
+                message directly in their language. This is a general discussion,
+                not a development task. No filesystem or terminal tools are available.
+                Never claim to have executed commands or modified files.
+              complete: true
+              includeRuntimeContext: false
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'

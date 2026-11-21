@@ -63,6 +63,7 @@ import type { ResolvedPiAiProviderProfile } from './config.ts'
 import { requestImageTarget, toPiContext } from './context.ts'
 import { readLmStudioModels } from './discovery.ts'
 import { fetchLmStudioStream } from './lm-studio-fetch.ts'
+import { FINAL_CHANNEL_INSTRUCTION, recoverSelfChannel } from './self-channel.ts'
 import { markDevstralRequests, mergeDevstralUsers } from './devstral-payload.ts'
 import { estimateLmStudioPrompt, lmStudioOverflow, resizeLmStudioContext, waitForLmStudioResize } from './lm-studio-context.ts'
 import { conversationUpdates, createModels, getSupportedThinkingLevels } from './models.ts'
@@ -604,18 +605,29 @@ export class PiAiAdapter extends LlmAdapter {
       const { context, digest } = bindThinkingToPrefix(converted, model.api, prefixDigests, manualThinking, (count) => {
         this.config.onThinkingOmitted?.({ provider: options.provider, model: options.model, count })
       })
-      const events = snapshot.models.streamSimple(model, context, {
-        ...profileOptions(profile, reasoning, apiKey),
-        ...(model.api === 'openai-completions' && /devstral/i.test(model.id) && { onPayload: mergeDevstralUsers }),
-        ...(model.api === 'openai-completions' && profile.lmStudioModels?.has(model.id) && {
-          fetch: fetchLmStudioStream,
-        }),
-        ...options.temperature === undefined ? {} : { temperature: options.temperature },
-        ...options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens },
-        ...options.sessionId === undefined ? {} : { sessionId: String(options.sessionId) },
-        signal: watchdog.signal,
-        headers: requestHeaders(profile.headers, options, model.baseUrl, this.config.prepareHeaders),
-      })
+      const open = (retry: boolean, usedOutput: number) => {
+        const replyBudget = options.maxTokens ?? model.maxTokens
+        const maxTokens = retry ? replyBudget - usedOutput - 128 : replyBudget
+        if (retry && maxTokens < 1) throw new LlmError('No reply budget remains for channel recovery', 'MALFORMED_RESPONSE')
+        return snapshot.models.streamSimple(model, retry ? {
+          ...context, systemPrompt: (context.systemPrompt ?? '') + FINAL_CHANNEL_INSTRUCTION,
+        } : context, {
+          ...profileOptions(profile, reasoning, apiKey),
+          ...(model.api === 'openai-completions' && /devstral/i.test(model.id) && { onPayload: mergeDevstralUsers }),
+          ...(model.api === 'openai-completions' && profile.lmStudioModels?.has(model.id) && {
+            fetch: fetchLmStudioStream,
+          }),
+          ...options.temperature === undefined ? {} : { temperature: options.temperature },
+          ...options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens },
+          ...retry ? { maxTokens } : {},
+          ...options.sessionId === undefined ? {} : { sessionId: String(options.sessionId) },
+          signal: watchdog.signal,
+          headers: requestHeaders(profile.headers, options, model.baseUrl, this.config.prepareHeaders),
+        })
+      }
+      const events = model.api === 'openai-completions' && profile.lmStudioModels?.has(model.id) && tools.length === 0
+        ? recoverSelfChannel(open)
+        : open(false, 0)
       const chunks = toStreamChunks(events, contextWindow ?? model.contextWindow, options.signal, model.id, digest)
       const iterator = chunks[Symbol.asyncIterator]()
       let exhausted = false

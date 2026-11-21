@@ -132,6 +132,7 @@ function mount(
     overlayTakeover?: boolean
     /** The session list summary's `blank` flag — independent of the snapshot's. */
     summaryBlank?: boolean
+    agentPreset?: string
     /** Drop the session's summary row entirely (a session the list has not caught up with). */
     omitSummaryRow?: boolean
     /** Classify the selected child as a subagent instead of an ordinary fork. */
@@ -162,6 +163,7 @@ function mount(
     id: SID, displayTitle: 'Child', parentId: options.nestedSubagent === true ? parent : root,
     cwd: '/projects/one', running: false, retainedBy: { mainView: 1 }, blank: options.summaryBlank ?? false, updatedAt: 3,
     ...(options.summaryOrigin === undefined ? {} : { origin: options.summaryOrigin }),
+    ...(options.agentPreset === undefined ? {} : { projectionValues: { agentPreset: options.agentPreset } }),
   }
   const listed = options.omitSummaryRow !== true
   const sessions = createSnapshotStore<SessionListState>({
@@ -486,6 +488,15 @@ describe('ConversationRoot resident composer', () => {
     const seat = (key: string) => b.seatOwners.filter(call => call.key === key).at(-1)?.owner
     expect(seat('conversation.input.model')).toEqual({ locked: false })
     expect(seat('conversation.input.plan')).toEqual({ locked: true })
+  })
+
+  it('allows a blank discussion without a workspace', () => {
+    const b = mount(sessionSnapshotOf({ blank: true }), [], undefined, {
+      summaryBlank: true, agentPreset: 'discussion',
+    })
+    const box = b.view.getByRole('textbox')
+    expect(box.getAttribute('contenteditable')).toBe('true')
+    expect(box.getAttribute('aria-haspopup')).not.toBe('menu')
   })
 
   it('lets the no-workspace posture win over a block', () => {

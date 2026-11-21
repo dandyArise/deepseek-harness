@@ -965,6 +965,28 @@ describe('UiWorkspaceService', () => {
       },
     )
 
+    it('starts a discussion without a workspace and retains its selection', async () => {
+      const backing = persistSelection({})
+      const b = bench()
+      b.sessions.create.mockResolvedValueOnce(sid('discussion'))
+      b.uiWorkspace.startSession(undefined, { agentPreset: 'discussion' })
+      await setImmediate()
+      expect(b.sessions.create).toHaveBeenCalledExactlyOnceWith({ agentPreset: 'discussion' })
+      expect(JSON.parse(backing.get('dsh.sessions.current')!)).toEqual({ sessionId: sid('discussion') })
+      expect(b.notify).not.toHaveBeenCalled()
+    })
+
+    it('reports discussion creation failures without replacing the current session', async () => {
+      const backing = persistSelection({})
+      const b = bench()
+      b.uiWorkspace.openSession(sid('previous'))
+      b.sessions.create.mockRejectedValueOnce(new Error('offline'))
+      b.uiWorkspace.startSession(undefined, { agentPreset: 'discussion' })
+      await setImmediate()
+      expect(JSON.parse(backing.get('dsh.sessions.current')!)).toEqual({ sessionId: sid('previous') })
+      expect(b.notify).toHaveBeenCalledWith({ kind: 'createFailed', message: 'offline' })
+    })
+
     it('requests a Workspace without clearing the current selection when no Workspace is available', () => {
       const backing = persistSelection({})
       const b = bench()
