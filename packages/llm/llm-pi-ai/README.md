@@ -25,6 +25,8 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
+For imported LM Studio models, leading `<think>` blocks are separated from visible answers, including after tool calls. Fragmented tags are recognized across stream chunks; ordinary quoted examples remain unchanged. Tool-enabled requests retain reasoning as typed blocks and preserve structured tool calls. Tool-free malformed responses use at most one recovery request within the remaining output budget; a closed think block with a final answer needs no recovery request.
+
 Mount this plugin when a composition routes model requests through pi-ai's provider catalogs or through gateways that pi-ai's installed catalog does not describe. The `providers` dictionary is the whole configuration surface: each key is the provider route name a request selects with `GenerateOptions.provider`.
 
 The adapter accepts the LLM service's [request-only user inputs](../llm/README.md#use-this-package) alongside durable history. User identity and attribution do not enter pi-ai content; assistant replay metadata and tool-call correlation remain attached to durable messages.

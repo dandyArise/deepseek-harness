@@ -64,6 +64,7 @@ import { requestImageTarget, toPiContext } from './context.ts'
 import { readLmStudioModels } from './discovery.ts'
 import { fetchLmStudioStream } from './lm-studio-fetch.ts'
 import { FINAL_CHANNEL_INSTRUCTION, recoverSelfChannel } from './self-channel.ts'
+import { normalizeThinkTags } from './think-tags.ts'
 import { markDevstralRequests, mergeDevstralUsers } from './devstral-payload.ts'
 import { estimateLmStudioPrompt, lmStudioOverflow, resizeLmStudioContext, waitForLmStudioResize } from './lm-studio-context.ts'
 import { conversationUpdates, createModels, getSupportedThinkingLevels } from './models.ts'
@@ -628,7 +629,9 @@ export class PiAiAdapter extends LlmAdapter {
       const events = model.api === 'openai-completions' && profile.lmStudioModels?.has(model.id) && tools.length === 0
         ? recoverSelfChannel(open)
         : open(false, 0)
-      const chunks = toStreamChunks(events, contextWindow ?? model.contextWindow, options.signal, model.id, digest)
+      const normalized = model.api === 'openai-completions' && profile.lmStudioModels?.has(model.id)
+        ? normalizeThinkTags(events) : events
+      const chunks = toStreamChunks(normalized, contextWindow ?? model.contextWindow, options.signal, model.id, digest)
       const iterator = chunks[Symbol.asyncIterator]()
       let exhausted = false
       try {

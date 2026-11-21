@@ -3,9 +3,10 @@ import { LlmError } from '@deepseek-ai/dsh-llm'
 
 const SELF = 'to=self<|message|>'
 const USER = 'to=user<|message|>'
+const THINK = '<think>'
 export const FINAL_CHANNEL_INSTRUCTION = '\nAnswer the latest user message directly. Produce only the final user-facing answer, without internal reasoning or channel headers.'
 
-/** Repair leaked channel headers at the provider boundary, never in rendered Markdown.
+/** Repair leading channel headers and think blocks before rendered Markdown.
  * Ordinary replies stream after their first non-header prefix. A malformed reply is
  * withheld and retried once; internal deliberation is never promoted to an answer.
  */
@@ -34,8 +35,9 @@ export async function* recoverSelfChannel(
       pending.push(event)
       if (event.type === 'text_delta') prefix += event.delta
       const trimmed = prefix.trimStart()
-      const channel = trimmed.startsWith(SELF) || trimmed.startsWith(USER)
-      const possible = SELF.startsWith(trimmed) || USER.startsWith(trimmed)
+      const thinking = trimmed.startsWith(THINK)
+      const channel = trimmed.startsWith(SELF) || trimmed.startsWith(USER) || thinking
+      const possible = [SELF, USER, THINK].some(header => header.startsWith(trimmed))
       if ((!channel && !possible) || event.type === 'thinking_start' || event.type === 'toolcall_start') {
         passing = true
         for (const buffered of pending) yield buffered
@@ -54,7 +56,10 @@ export async function* recoverSelfChannel(
         return
       }
       const userAt = trimmed.indexOf(USER)
-      const answer = userAt < 0 ? '' : trimmed.slice(userAt + USER.length).replace(/<\|(?:im_end|end|fim_suffix)\|>\s*$/, '').trim()
+      const thinkEnd = thinking ? trimmed.indexOf('</think>', THINK.length) : -1
+      const answer = thinking
+        ? thinkEnd < 0 ? '' : trimmed.slice(thinkEnd + '</think>'.length).trim()
+        : userAt < 0 ? '' : trimmed.slice(userAt + USER.length).replace(/<\|(?:im_end|end|fim_suffix)\|>\s*$/, '').trim()
       if (answer && !answer.includes('<|') && !answer.includes('to=self')) {
         const message = withUsage({ ...event.message, content: [{ type: 'text', text: answer }] })
         yield { type: 'text_start', contentIndex: 0, partial: message }
