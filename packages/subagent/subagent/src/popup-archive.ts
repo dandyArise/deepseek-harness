@@ -13,11 +13,11 @@ declare module '@deepseek-ai/dsh-session/types' {
 }
 
 const viewSchema = z.object({
-  archived: z.array(z.string() as unknown as z.ZodType<SessionId>),
+  archived: z.array(z.custom<SessionId>(value => typeof value === 'string')),
   auto: z.boolean(),
 })
 const stateSchema = viewSchema.extend({
-  inherited: z.number().int().nonnegative() as unknown as z.ZodType<SessionLogOffset>,
+  inherited: z.custom<SessionLogOffset>(value => z.number().int().nonnegative().safeParse(value).success),
 })
 
 export const subagentArchiveProjection = {

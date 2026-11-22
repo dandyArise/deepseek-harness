@@ -8,6 +8,17 @@ import { subagentArchiveProjection, applySubagentArchiveLifecycle } from '../src
 import { TestSessionQuery } from './test-session-query.ts'
 import { mountWorkingDirectoryFixture } from './working-directory-fixture.ts'
 
+it('validates archived IDs and inherited offsets when restoring a checkpoint', () => {
+  const schema = subagentArchiveProjection.stateSchema
+  expect(schema.safeParse({ archived: ['child'], auto: false, inherited: 0 }).success).toBe(true)
+  for (const archived of [[1], [null], 'child']) {
+    expect(schema.safeParse({ archived, auto: false, inherited: 0 }).success).toBe(false)
+  }
+  for (const inherited of [-1, 1.5, '0', Infinity, NaN]) {
+    expect(schema.safeParse({ archived: [], auto: false, inherited }).success).toBe(false)
+  }
+})
+
 it('archives direct successful children, including an open inactive conversation, and replays the parent delta', async () => {
   const ctx = new Context()
   try {
