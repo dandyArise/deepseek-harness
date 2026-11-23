@@ -139,6 +139,8 @@ export class BasicCompactionEngine extends CompactionEngine {
   private readonly warnedPressureConfigTargets = new Set<string>()
   private readonly overflowRetries = new WeakMap<Agent, number>()
   private readonly overflowAgents = new WeakMap<Session, Agent>()
+  /** Proposed routes are not committed until switch compaction succeeds. */
+  private readonly pendingSummaryRoutes = new WeakMap<Agent, SummaryRoute>()
   /** Registered at construction; `summarize()` awaits it, so no read precedes readiness. */
   private readonly answeredRoute: Promise<ProjectionHandle<AnsweredRoute>>
 
@@ -202,6 +204,7 @@ export class BasicCompactionEngine extends CompactionEngine {
         || (previous.config.provider === config.provider && previous.config.model === config.model)) return config
       try {
         const header = { ...previous, config }
+        this.pendingSummaryRoutes.set(agent, { provider: config.provider, model: config.model })
         const result = await this.compactPressure(agent, header, signal, true)
         if (result !== null) logResult(result, 'model switch')
       } catch (error: unknown) {
@@ -213,6 +216,8 @@ export class BasicCompactionEngine extends CompactionEngine {
           'MODEL_SWITCH_COMPACTION_FAILED',
           { cause: error },
         )
+      } finally {
+        this.pendingSummaryRoutes.delete(agent)
       }
       return config
     }, { prepend: true })
@@ -299,7 +304,7 @@ export class BasicCompactionEngine extends CompactionEngine {
       try {
         info = await this.ctx.llm.resolveModelInfo(target.provider, target.model, signal)
       } catch (error) {
-        const current = routedTarget(agent.session)
+        const current = this.pendingSummaryRoutes.get(agent) ?? routedTarget(agent.session)
         // A removed catalogue entry cannot summarize. Stay on the user's
         // current provider; do not hide authentication or transport failures.
         if (!(error instanceof LlmError) || error.code !== 'UNKNOWN_MODEL'

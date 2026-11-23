@@ -66,6 +66,9 @@ it.each([[false, false], [true, false], [false, true]])('compacts history retain
     seed.append('turn/start', { turn })
     seed.append('user/message', createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'x'.repeat(underestimated ? 1000 : 11970) }] }), { surfaceOp: 'append' })
     seed.append('step/start', { turn, step: 1 })
+    if (removed && turn === 1) seed.append('request/header', {
+      header: { config: { provider: 'lmstudio', model: 'removed-v7' } }, reason: 'initial',
+    })
     seed.append('assistant/message', { turn, step: 1, stream: [], message: createMessage({ role: 'assistant',
       source: { kind: 'model', provider: 'lmstudio', model: removed ? 'removed-v7' : model }, content: [{ type: 'text', text: 'saved' }] }) }, { surfaceOp: 'append' })
     seed.append('step/end', { turn, step: 1 })
@@ -74,6 +77,7 @@ it.each([[false, false], [true, false], [false, true]])('compacts history retain
   try {
     const { agent } = await ctx.agentLoop.createAgent(ctx, { sessionId: brandString<SessionId>('loaded-capacity'),
       seed: seed.snapshotEvents(), agentOptions: { provider: 'lmstudio', model } })
+    if (removed) agent.model.select({ provider: 'lmstudio', model })
     const latest = 'Réponds uniquement OK. Ne lance aucun outil et ne modifie aucun fichier.'
     agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: latest }] }))
     await agent.whenIdle()

@@ -255,7 +255,7 @@ For a confirmed loaded LM Studio instance, automatic compaction budgets the summ
 
 Loaded LM Studio windows use a short checkpoint instruction (200-word target) and reserve up to one quarter of the window for summary output. History chunks use the remaining input budget after pricing that directive; the system head counts toward that budget. Explicit alternate summarizers retain the half-window bound. Up to four passes are available by default; truncated checkpoints are still rejected rather than silently losing context. Token estimates remain heuristic, and overflow recovery stays enabled.
 
-If the previous answering model was removed from the catalogue (`UNKNOWN_MODEL`), automatic summarization falls back to the current request model on the same provider. Explicit summary routes and authentication/transport failures are not silently replaced.
+If the previous answering model was removed from the catalogue (`UNKNOWN_MODEL`), automatic summarization falls back to the current request model on the same provider. During a model switch this is the proposed destination, before its request header is committed. Explicit summary routes and authentication/transport failures are not silently replaced.
 
 For LM Studio instances with a known loaded context, automatic pressure compaction and overflow recovery both keep the latest user instruction verbatim, even with a smaller retention budget. Earlier history is summarized without replacing the current task.
 
