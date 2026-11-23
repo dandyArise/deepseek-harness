@@ -65,7 +65,7 @@ The executor receives the entire raw call batch and owns parsing, scheduling, ca
 
 #### What the model sees
 
-Each visible tool’s `name`, `description`, and JSON Schema parameters; no additional prompt section.
+Each visible tool’s `name`, `description`, and JSON Schema parameters; no additional prompt section. When the resolved model context is known, native definitions receive one quarter of that window. Oversized catalogues first use shorter descriptions and omit schema annotations (not validation constraints). If still oversized, `harness_discover_tools` searches the scoped, step-admitted catalogue in pages of twelve. Requesting an exact name enables that tool for the next step, replacing the previous selection. Selection belongs to each live Agent and resets on restart; original argument validation and execution policies remain authoritative. A single schema too large for the budget returns an explicit error. Context and tool token counts are estimates, not tokenizer guarantees.
 
 #### Token effect
 

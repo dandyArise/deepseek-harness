@@ -2,6 +2,8 @@
 
 [English](subagent.md) | 中文
 
+`SubagentArchiveState` 记录已归档子会话 ID、自动归档偏好和可选显示名。`SubagentArchiveUpdate` 选择 `archiveCompleted`、`restore`、`setAuto` 或 `rename`；[投影类型](../../packages/subagent/subagent/src/projection-types.ts)与[归档实现](../../packages/subagent/subagent/src/popup-archive.ts)定义该约定。批量归档排除活动子会话，且要求轮次已成功结束；恢复仅改变可见性，不会重新执行子会话。
+
 统一的 activation API 管理本地对话和外部执行。创建祖先关系、运行归属和通信由 subagent 树管理。[subagent 控制工具](../../packages/subagent/tool-subagent-control/README.zh.md)负责 agent 身份和当前调用者的收件箱等待；Team 工具添加共享任务与任务策略。
 
 ## 能力与 activation 请求
@@ -444,6 +446,14 @@ Named provider registry with managed activations, durable discovery, and local c
 
 ```ts cordis-catalog
 /**
+ * Update parent-owned archive state using the manager's live activity check.
+ * @param parent - session owning the direct-child catalog.
+ * @param update - requested archive, restoration, rename or preference operation.
+ * @returns the resulting archive snapshot.
+ */
+updateArchive(parent: Session, update: SubagentArchiveUpdate): Promise<SubagentArchiveState>
+
+/**
  * Resolve a delegation tool's depth policy against the current user setting.
  * @param configured - Explicit tool limit, or provider-managed for external delegation.
  * @returns The numeric limit, or undefined when the provider owns depth enforcement.
@@ -617,7 +627,7 @@ registerProvider(provider: SubagentProvider): () => void
 getProvider(name: string): SubagentProvider | undefined
 ```
 
-Types: [Agent](core.zh.md) · [ContentBlock](llm-streaming.zh.md) · [MessageId](llm-streaming.zh.md) · [SessionId](core.zh.md)
+Types: [Agent](core.zh.md) · [ContentBlock](llm-streaming.zh.md) · [MessageId](llm-streaming.zh.md) · [Session](session.zh.md) · [SessionId](core.zh.md)
 
 Source: [`packages/subagent/subagent/src/index.ts`](../../packages/subagent/subagent/src/index.ts)
 

@@ -136,7 +136,14 @@ function nativeLmStudioListing(body: unknown, advertised: LlmDiscoveredModel[]):
     const ids = new Set([key, ...instances.flatMap(instance => typeof instance?.id === 'string' ? [instance.id] : [])])
     for (const id of ids) {
       const instance = instances.find(value => value?.id === id)
+      // A request may use the model key while the loaded copy has a different
+      // identifier. Use the smallest loaded capacity when that key is ambiguous.
+      const loadedSizes = instances.flatMap((value) => {
+        const size = capacity(value?.config?.context_length)
+        return size === undefined ? [] : [size]
+      })
       const loadedContext = capacity(instance?.config?.context_length)
+        ?? (id === key && loadedSizes.length > 0 ? Math.min(...loadedSizes) : undefined)
       const contextWindow = loadedContext ?? maxContext
       byId.set(id, {
         id, name: label(row.display_name) ?? id,
@@ -156,7 +163,16 @@ function nativeLmStudioListing(body: unknown, advertised: LlmDiscoveredModel[]):
       })
     }
   }
-  return advertised.filter(model => !nonChat.has(model.id)).map(model => byId.get(model.id) ?? model)
+  return advertised.filter(model => !nonChat.has(model.id)).map((model) => {
+    const exact = byId.get(model.id)
+    if (exact !== undefined) return exact
+    // LM Studio accepts short IDs while its native catalogue may qualify them
+    // with a publisher. Only use an unambiguous identifier suffix, never names.
+    const matches = [...byId.values()].filter(candidate => candidate.id.endsWith('/' + model.id))
+    const match = matches[0]
+    if (matches.length !== 1 || match === undefined) return model
+    return { ...match, id: model.id }
+  })
 }
 
 /** A non-empty string field of a listing entry, or `undefined`. */
@@ -480,7 +496,14 @@ export async function discoverModels(
   return enriched.map(model => model.lmStudio ? model : { ...model, lmStudio: { source: new URL(url).pathname } })
 }
 
-/** Native read-only metadata for the advertised ids; never contacts an inference endpoint. */
+/**
+ * Native read-only metadata for the advertised ids; never contacts an inference endpoint.
+ * @param url - models endpoint whose origin hosts the optional native catalog.
+ * @param headers - authentication headers already resolved for this endpoint.
+ * @param models - advertised entries to enrich.
+ * @param signal - optional caller cancellation.
+ * @returns enriched models, or undefined when native metadata is unavailable.
+ */
 export async function readLmStudioModels(
   url: string, headers: Headers, models: LlmDiscoveredModel[], signal?: AbortSignal,
 ): Promise<LlmDiscoveredModel[] | undefined> {

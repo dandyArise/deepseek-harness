@@ -12,7 +12,7 @@ it('survives an idle SSE body until the caller deadline and still honors cancell
     res.writeHead(200, { 'Content-Type': 'text/event-stream' })
     res.flushHeaders()
     const timer = setTimeout(() => res.end('data: OK\n\n'), 1800)
-    res.on('close', () => clearTimeout(timer))
+    res.on('close', () => { clearTimeout(timer) })
   })
   try {
     server.listen(0, '127.0.0.1')

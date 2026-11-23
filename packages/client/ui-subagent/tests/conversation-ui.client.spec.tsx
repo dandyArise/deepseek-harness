@@ -217,6 +217,34 @@ function HeaderCatalog(props: HeaderCatalogProps) {
 }
 
 describe('SubagentHeaderLineage', () => {
+  it('renames only the addressed child, rejects blank names, and retains a failed edit', async () => {
+    const rename = vi.fn().mockRejectedValueOnce(new Error('Offline')).mockResolvedValue(undefined)
+    const panel = (title?: string) => <HeaderCatalog
+      {...props(catalog(), {}, { [PARENT]: { ...summary(PARENT, 1), projectionValues: {
+        subagentArchive: { archived: [], auto: false, ...title === undefined ? {} : { names: { [CHILD]: title } } },
+      } } })}
+      agentAction={vi.fn()} renameAgent={rename} t={makeTranslate(en)} />
+    const view = render(panel())
+    fireEvent.click(screen.getByRole('button', { name: /2/ }))
+    const row = screen.getByRole('group', { name: /child · worker/ })
+    fireEvent.click(within(row).getByRole('button', { name: 'Rename' }))
+    const input = within(row).getByRole('textbox', { name: 'Display name' })
+    fireEvent.change(input, { target: { value: '   ' } })
+    expect(within(row).getByRole<HTMLButtonElement>('button', { name: 'Save' }).disabled).toBe(true)
+    fireEvent.change(input, { target: { value: '  Revue CSV  ' } })
+    fireEvent.click(within(row).getByRole('button', { name: 'Save' }))
+    expect((await within(row).findByRole('alert')).textContent).toBe('Offline')
+    expect((input as HTMLInputElement).value).toBe('  Revue CSV  ')
+    fireEvent.click(within(row).getByRole('button', { name: 'Save' }))
+    await waitFor(() => { expect(within(row).queryByRole('textbox')).toBeNull() })
+    expect(rename.mock.calls).toEqual(Array(2).fill([
+      { parentSessionId: PARENT, childSessionId: CHILD, mode: 'continuable' }, 'Revue CSV',
+    ]))
+    view.rerender(panel('Revue CSV'))
+    expect(screen.getByRole('group', { name: 'child · Revue CSV' })).toBeTruthy()
+    expect(screen.getByRole('group', { name: 'child-2 · reviewer' })).toBeTruthy()
+  })
+
   it('uses shared archive state, restores the addressed child, and keeps running children visible', async () => {
     const update = vi.fn().mockResolvedValue(undefined)
     const sibling = 'child-2' as SessionId
@@ -236,10 +264,10 @@ describe('SubagentHeaderLineage', () => {
     const optIn = screen.getByRole('checkbox', { name: en['archive.auto'] }) as HTMLInputElement
     expect(optIn.checked).toBe(false)
     fireEvent.click(optIn)
-    await waitFor(() => expect(optIn.disabled).toBe(false))
+    await waitFor(() => { expect(optIn.disabled).toBe(false) })
     expect(update).toHaveBeenCalledWith({ action: 'setAuto', enabled: true })
     fireEvent.click(screen.getByRole('button', { name: en['archive.completed'] }))
-    await waitFor(() => expect(optIn.disabled).toBe(false))
+    await waitFor(() => { expect(optIn.disabled).toBe(false) })
     expect(update).toHaveBeenCalledWith({ action: 'archiveCompleted' })
     view.rerender(panel([CHILD, sibling], true))
     expect(optIn.checked).toBe(true)
@@ -249,7 +277,7 @@ describe('SubagentHeaderLineage', () => {
     fireEvent.click(disclosure)
     fireEvent.click(within(disclosure.closest('details')!).getByRole('button', { name: 'Restore' }))
     expect(update).toHaveBeenCalledWith({ action: 'restore', childId: CHILD })
-    await waitFor(() => expect(optIn.disabled).toBe(false))
+    await waitFor(() => { expect(optIn.disabled).toBe(false) })
     view.rerender(panel([], true))
     expect(screen.queryByText('Archived (1)')).toBeNull()
     expect(screen.getByRole('group', { name: /child · worker/ }).closest('details')).toBeNull()
@@ -277,6 +305,35 @@ describe('SubagentHeaderLineage', () => {
     expect(screen.getByText(/Recorded usage/).textContent).toContain('500')
   })
 
+  it('keeps mixed outcomes visible and includes archived usage after remount', () => {
+    const ids = ['done', 'running', 'failed', 'stopped'].map(id => id as SessionId)
+    const fixture = props(catalog({ entries: ids.map((id, index) => ({
+      id, mode: 'continuable', label: id, activity: index === 1 ? 'running' : 'inactive',
+      ...index === 2 ? { failed: true } : {},
+    })) }), {}, {
+      [PARENT]: { ...summary(PARENT, 1), projectionValues: { subagentArchive: { archived: ids, auto: true } } },
+      ...Object.fromEntries(ids.map((id, index) => [id, { ...summary(id, 1), running: index === 1,
+        projectionValues: {
+          subagentTiming: { settledMs: 10, lastTurnCompleted: index === 0 },
+          tokenUsage: { uncachedInputTokens: (index + 1) * 100, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        },
+      }])),
+    })
+    const panel = () => <HeaderCatalog {...fixture} agentAction={vi.fn()} updateArchive={vi.fn()} t={makeTranslate(en)} />
+    const check = () => {
+      fireEvent.click(screen.getByRole('button', { name: /4/ }))
+      expect(screen.getByText('Archived (1)')).toBeTruthy()
+      expect(screen.getByRole<HTMLInputElement>('checkbox', { name: en['archive.auto'] }).checked).toBe(true)
+      for (const id of ids.slice(1)) expect(screen.getByRole('group', { name: id }).closest('details')).toBeNull()
+      expect(screen.getByText(/Recorded usage/).textContent).toContain('1K')
+    }
+    const view = render(panel())
+    check()
+    view.unmount()
+    render(panel())
+    check()
+  })
+
   it('restarts the completed child selected in the popup', async () => {
     const perform = vi.fn().mockResolvedValue('')
     const input = props(catalog(), {}, {
@@ -296,7 +353,7 @@ describe('SubagentHeaderLineage', () => {
     const target = document.createElement('aside')
     target.id = `session-agents-sidebar-${PARENT}`
     document.body.append(target)
-    const perform = vi.fn().mockRejectedValueOnce(new Error('Transport hors ligne')).mockResolvedValueOnce('route CSV')
+    const perform = vi.fn<(address: SubagentAddress, action: 'stop' | 'retry' | 'result' | 'instruction') => Promise<string>>().mockRejectedValueOnce(new Error('Transport hors ligne')).mockResolvedValueOnce('route CSV')
     const copy = vi.fn().mockResolvedValue(undefined)
     const original = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: copy } })
@@ -332,11 +389,11 @@ describe('SubagentHeaderLineage', () => {
       render(<HeaderCatalog {...input} t={makeTranslate(en)} />)
       const first = within(target).getByRole('button', { name: /child · worker/ })
       const second = within(target).getByRole('button', { name: /child-2 · reviewer/ })
-      expect(first!.textContent).toContain('child · worker')
-      expect(first!.querySelector('progress')?.value).toBe(100)
-      expect(second!.querySelector('progress')).toBeNull()
+      expect(first.textContent).toContain('child · worker')
+      expect(first.querySelector('progress')?.value).toBe(100)
+      expect(second.querySelector('progress')).toBeNull()
       expect(target.querySelector('footer')?.textContent).toContain('100')
-      fireEvent.click(first!)
+      fireEvent.click(first)
       expect(input.openChildAside).toHaveBeenCalledWith({ parentSessionId: PARENT, childSessionId: CHILD, mode: 'continuable' })
       fireEvent.click(target.querySelector('summary')!)
       fireEvent.click(within(target).getByRole('button', { name: en.retry }))

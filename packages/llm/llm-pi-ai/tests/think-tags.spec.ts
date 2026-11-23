@@ -53,7 +53,7 @@ it('keeps incomplete reasoning out of the visible answer while emitting live rea
 })
 it('preserves literal examples and normal text', async () => {
   for (const text of ['Bonjour', 'Exemple : <think>x</think>', '<thing>', '<thi']) {
-    const result = await collect(reply([...text]))
+    const result = await collect(reply(text.split('')))
     expect(result.filter(e => e.type === 'text_delta').map(e => e.delta).join('')).toBe(text)
   }
 })

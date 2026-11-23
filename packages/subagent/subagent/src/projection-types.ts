@@ -89,15 +89,20 @@ export type SubagentIdentityProjection =
     seq: SessionSeq
   }
 
+/** Parent-owned popup visibility and display labels, independent of usage accounting. */
 export interface SubagentArchiveState {
   archived: SessionId[]
   auto: boolean
+  /** User display labels keyed by immutable child session IDs; absent in older logs. */
+  names?: Record<string, string> | undefined
 }
 
+/** Supported mutations of a parent's direct-child popup archive. */
 export type SubagentArchiveUpdate =
   | { action: 'archiveCompleted' }
   | { action: 'restore'; childId: SessionId }
   | { action: 'setAuto'; enabled: boolean }
+  | { action: 'rename'; childId: SessionId; name: string }
 
 declare module '@deepseek-ai/dsh-session-projection/types' {
   interface SessionProjectionMap {

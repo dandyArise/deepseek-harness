@@ -291,7 +291,7 @@ interface ToolExecutor {
    * @param tools - currently visible capability definitions, after scoped restrictions.
    * @returns schemas and names used to validate tool ordering.
    */
-  describe(tools: readonly ToolDefinition[]): ToolModelInput
+  describe(tools: readonly ToolDefinition[], context?: { scope?: object; contextWindow?: number }): ToolModelInput
   /**
    * Execute a complete batch. With log, commit root call/result events to the
    * Agent's Session; without log, omit those events. Tool-owned events may still
@@ -681,6 +681,16 @@ restrict(filter: ToolRestriction): () => void
  * @returns the definition the scope resolves, or undefined when none is visible.
  */
 get(name: string, scope?: ScopeKey, toolSet?: ResolvedToolSet): ToolDefinition | undefined
+
+/**
+ * Adapt only executor-owned schemas using the already frozen model capacity.
+ * @param schemas - assembled model-facing schemas, including other contributors.
+ * @param scope - agent owning the visible definitions and executor.
+ * @param toolSet - frozen tool admission for this step.
+ * @param contextWindow - resolved context capacity in tokens.
+ * @returns schemas with only executor-owned entries replaced.
+ */
+adaptPresentation(schemas: readonly ToolSchema[], scope: ScopeKey, toolSet: ResolvedToolSet, contextWindow: number): ToolSchema[]
 
 /**
  * Resolve the definition a call may execute. With a step's admitted set, the

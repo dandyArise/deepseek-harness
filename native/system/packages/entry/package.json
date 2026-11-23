@@ -9,6 +9,10 @@
     "directory": "native/system/packages/entry"
   },
   "exports": {
+    "./kernels": {
+      "types": "./lib/kernels.d.ts",
+      "default": "./lib/kernels.js"
+    },
     "./landlock-run": {
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"

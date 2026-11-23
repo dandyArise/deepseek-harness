@@ -140,6 +140,11 @@ export class SubagentManager {
   /** Child session id → its live Activation. Process-local, never durable. */
   private readonly resident = new Map<SessionId, Activation>()
 
+  /**
+   * Check whether a child still owns a resident activation.
+   * @param child - child session identity.
+   * @returns whether the manager retains live execution ownership.
+   */
   hasActiveRun(child: SessionId): boolean {
     return this.resident.has(child)
   }

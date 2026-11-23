@@ -3,7 +3,15 @@ import type { Context } from '@deepseek-ai/cordis'
 import { BlockAssembler, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, ModelVerificationResult, RequestMessage } from '@deepseek-ai/dsh-llm'
 
-/** Exercise both directions of the Harness tool protocol on the configured adapter. */
+/**
+ * Exercise both directions of the Harness tool protocol on the configured adapter.
+ * @param ctx - context exposing the LLM service.
+ * @param provider - configured provider route.
+ * @param model - model identifier to verify.
+ * @param protocol - expected protocol, checked before generation.
+ * @param signal - caller cancellation combined with the verification deadline.
+ * @returns a measured structured-tool verdict and failure cause when applicable.
+ */
 export async function verifyToolRoundTrip(
   ctx: Context, provider: string, model: string, protocol: string, signal: AbortSignal,
 ): Promise<ModelVerificationResult> {

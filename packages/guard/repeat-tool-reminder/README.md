@@ -29,7 +29,7 @@ Mount this plugin when the model should catch itself looping on identical tool c
 
 ### When to choose it
 
-Choose it when the model works autonomously for long stretches and a stuck loop is the failure you want to break with advice rather than force. Avoid it when identical repeats are legitimate and must run undisturbed — the guard only reminds, and a reminder is a small extra message after the repeated call — and when near-identical variants must be caught, because only exact repeats (same tool, same arguments regardless of property order) are detected.
+Choose it when the model works autonomously for long stretches and a stuck loop is the failure you want to break with advice rather than force. Results that change reset the chain. Identical results may still be legitimate, so reminders never block calls. The optional `sameResultThreshold` can also advise on identical outcomes across different arguments; it does not establish semantic equivalence of those calls.
 
 ### Setting the thresholds and scope
 
@@ -50,6 +50,7 @@ When you want to change when reminders fire or which tools they cover, mount the
 | `include` | `[]` | Only these tools are tracked; empty means every tool |
 | `exclude` | `[]` | These tools are never tracked; calls to them neither count nor reset |
 | `argumentsPreviewChars` | `500` | How many characters of the repeated arguments the detailed reminder shows |
+| `sameResultThreshold` | `0` | Optional reminder after this many identical outcomes from the same tool even with different arguments; 0 disables it, otherwise an integer ≥ 3. Never blocks execution; identical acknowledgements may still represent useful work. |
 
 Invalid configuration fails at startup with a clear error — an empty `thresholds` list, a repeat count below 2, or a duplicate — never a silent change of behavior. The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-repeat-tool-reminder) documents every accepted value.
 
@@ -78,7 +79,7 @@ The guard is built on four commitments:
 
 ### Detection: the repeat chain
 
-Each agent's chain is keyed by `(tool name, canonical arguments)` — two calls with the same tool and canonically identical arguments (property order ignored) count as consecutive, and a different tracked call resets the count to 1. The chain lives in a `WeakMap<Agent, Chain>`.
+Each agent's chain compares `(tool name, canonical arguments, error/success, canonical result)` using a SHA-256 digest. A different tracked call or result resets the count to 1, so progressing polls and refreshed reads do not trigger reminders. Full values are compared, independently of the preview limit; only the digest and count remain in the `WeakMap<Agent, Chain>`. Identical acknowledgements cannot prove that external state is unchanged: reminders are advisory and never suppress execution. Polling may continue when an external change is expected.
 
 - **Untracked calls are transparent to the chain.** A call excluded by `include`/`exclude` neither increments nor resets the counter, so `grep X → todo_write → grep X` still counts as two consecutive `grep X` when `todo_write` is excluded — bookkeeping tools interleaved into a loop do not launder it.
 - **Denied calls count.** Detection sits on `tools/post-execute`, which also runs for calls a `tools/pre-execute` listener denied; a model hammering a denied call is exactly the loop worth breaking.

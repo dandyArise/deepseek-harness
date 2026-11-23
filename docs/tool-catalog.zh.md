@@ -2272,6 +2272,19 @@ subagent_oar 工具在为外部提供方配置的别名之间选择。本目录�
 
 ## `@deepseek-ai/dsh-tool-subagent-control`
 
+### `archive_completed_agents`
+
+在会话界面中归档你已完成的直接子代理。它们的对话仍可恢复。
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
+来源：[`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts)
+
 ### `interrupt_agent`
 
 请求 subagent 停止当前工作。此调用不等待其停止即返回。之后可以用 send_message 继续本地 subagent 的对话。外部执行会永久停止，无法接收后续消息。它启动的 subagent 会继续运行。

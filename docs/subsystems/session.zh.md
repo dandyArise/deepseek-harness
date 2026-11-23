@@ -2,6 +2,8 @@
 
 [English](session.md) | 中文
 
+`SessionSubagentArchiveRequest` 通过 `sessionId` 和 `update` 操作指定父会话；`SessionSubagentArchiveValue` 返回其 `SubagentArchiveState`。这些[请求类型](../../packages/api/session-controller/src/types.ts)将归档管理委托给[子代理服务](subagent.zh.md)，不改变子会话或 token 用量统计。
+
 [dsh-session](../../packages/core/session) 的内存事件溯源模型。`Session` 是一份由类型化 `SessionEvent` 组成的**仅追加日志**，是 agent（智能体）完整交互历史的唯一真源。LLM（大语言模型）消息历史从日志*派生*而来，从不单独存储；回放即从同一组事件重新派生。日志如何实现**持久化**（持久化 seam、后端、崩溃恢复）是兄弟文档 [persistence.md](persistence.zh.md) 的关注点。
 
 源码：[`packages/core/session/src/types.ts`](../../packages/core/session/src/types.ts)
@@ -971,6 +973,13 @@ workspaceDesktop(): { name: string; available: boolean; fileManager: 'finder' | 
 @Remote('rename') rename(request: SessionRenameRequest): Promise<SessionRenameValue>
 
 /**
+ * Update the direct-child archive owned by the addressed ordinary parent.
+ * @param request - parent session and requested archive operation.
+ * @returns the resulting archive state.
+ */
+@Remote('updateSubagentArchive') async updateSubagentArchive(request: SessionSubagentArchiveRequest): Promise<SessionSubagentArchiveValue>
+
+/**
  * Fork one cold-readable exact event prefix into a new Session. An omitted
  * boundary selects the latest completed-turn prefix; an open cut receives
  * synthetic fork closers.
@@ -1320,15 +1329,16 @@ Source: [`packages/api/session-controller/src/types.ts`](../../packages/api/sess
 
 #### `api-session/removed` — emit
 
-A Session left the live Host registry.
+A Session left the live Host registry or was permanently deleted.
 
 ```ts cordis-catalog
 /**
- * A Session left the live Host registry.
+ * A Session left the live Host registry or was permanently deleted.
  * @mode emit
  * @param sessionId - removed Session identity.
+ * @param permanent - whether the durable log was deleted rather than unloaded.
  */
-'api-session/removed'(sessionId: SessionId): void
+'api-session/removed'(sessionId: SessionId, permanent?: boolean): void
 ```
 
 Types: [SessionId](core.zh.md)
@@ -1382,6 +1392,26 @@ Read-only creation announcement after store entry. New events reject until every
 ```
 
 Types: [Scoped](scope.zh.md)
+
+Source: [`packages/core/session/src/index.ts`](../../packages/core/session/src/index.ts)
+
+<a id="sessiondeleted--parallel"></a>
+
+#### `session/deleted` — parallel
+
+Durable log removal barrier for derived stores. A retried deletion can have no header.
+
+```ts cordis-catalog
+/**
+ * Durable log removal barrier for derived stores. A retried deletion can have no header.
+ * @mode parallel
+ * @param id - deleted session identity.
+ * @param header - original header when the durable log was still available.
+ */
+'session/deleted'(id: SessionId, header?: SessionHeader): void | Promise<void>
+```
+
+Types: [SessionHeader](persistence.zh.md) · [SessionId](core.zh.md)
 
 Source: [`packages/core/session/src/index.ts`](../../packages/core/session/src/index.ts)
 

@@ -3038,6 +3038,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the accepted title and durable event sequence.',
       },
       {
+        signature: '@Remote(\'updateSubagentArchive\') async updateSubagentArchive(request: SessionSubagentArchiveRequest): Promise<SessionSubagentArchiveValue>',
+        description: 'Update the direct-child archive owned by the addressed ordinary parent.',
+        parameters: [{ name: 'request', description: 'parent session and requested archive operation.' }],
+        returns: 'the resulting archive state.',
+      },
+      {
         signature: '@Remote(\'fork\') async fork(request: SessionForkRequest): Promise<SessionForkValue>',
         description: 'Fork one cold-readable exact event prefix into a new Session. An omitted boundary selects the latest completed-turn prefix; an open cut receives synthetic fork closers.',
         parameters: [{ name: 'request', description: 'source Session, optional exact inclusive event boundary, and migration preflight choice.' }],
@@ -3204,6 +3210,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'List every stored session visible to this process, in no promised order.',
         parameters: [{ name: 'options', description: 'optional cancellation.' }],
         returns: 'one snapshot per stored session.',
+      },
+      {
+        signature: 'async delete(id: SessionId): Promise<void>',
+        description: 'Permanently erase this session\'s durable history after its writer has closed.',
+        parameters: [{ name: 'id', description: 'session identity whose stored log must be removed.' }],
       },
     ],
   },
@@ -3690,6 +3701,18 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'confirmation after the native opener accepts the document.',
         throws: ['RemoteError when no document exists, preparation fails, or opening fails.'],
       },
+      {
+        signature: '@Remote readGlobalInstructions(): Promise<GlobalInstructionsDocument>',
+        description: 'Read the process-home AGENTS.md; callers cannot choose a filesystem path.',
+        parameters: [],
+        returns: 'Markdown, resolved path and revision used for a guarded save.',
+      },
+      {
+        signature: '@Remote saveGlobalInstructions(content: string, revision: string): Promise<GlobalInstructionsDocument>',
+        description: 'Save global Markdown without overwriting a newer editor revision.',
+        parameters: [{ name: 'content', description: 'complete Markdown text.' }, { name: 'revision', description: 'revision returned by the last read.' }],
+        returns: 'the committed document.',
+      },
     ],
   },
   {
@@ -3978,6 +4001,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     summary: 'Named provider registry with managed activations, durable discovery, and local child messaging.',
     description: 'Named provider registry with managed activations, durable discovery, and local child messaging.',
     methods: [
+      {
+        signature: 'updateArchive(parent: Session, update: SubagentArchiveUpdate): Promise<SubagentArchiveState>',
+        description: 'Update parent-owned archive state using the manager\'s live activity check.',
+        parameters: [{ name: 'parent', description: 'session owning the direct-child catalog.' }, { name: 'update', description: 'requested archive, restoration, rename or preference operation.' }],
+        returns: 'the resulting archive snapshot.',
+      },
       {
         signature: 'resolveMaxDepth(configured?: number | \'provider-managed\'): number | undefined',
         description: 'Resolve a delegation tool\'s depth policy against the current user setting.',
@@ -4427,6 +4456,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Look up a tool as one scope sees it (scoped shadows global; a restricted-away global reads as absent). Presenters pass the calling agent so the rendered card matches the definition that actually executed.',
         parameters: [{ name: 'name', description: 'the tool name as registered.' }, { name: 'scope', description: 'the viewing scope (the agent); omitted = the global view.' }, { name: 'toolSet', description: 'step admission; omit only to inspect registered definitions.' }],
         returns: 'the definition the scope resolves, or undefined when none is visible.',
+      },
+      {
+        signature: 'adaptPresentation(schemas: readonly ToolSchema[], scope: ScopeKey, toolSet: ResolvedToolSet, contextWindow: number): ToolSchema[]',
+        description: 'Adapt only executor-owned schemas using the already frozen model capacity.',
+        parameters: [{ name: 'schemas', description: 'assembled model-facing schemas, including other contributors.' }, { name: 'scope', description: 'agent owning the visible definitions and executor.' }, { name: 'toolSet', description: 'frozen tool admission for this step.' }, { name: 'contextWindow', description: 'resolved context capacity in tokens.' }],
+        returns: 'schemas with only executor-owned entries replaced.',
       },
       {
         signature: 'executable(name: string, scope?: ScopeKey, toolSet?: ResolvedToolSet): ToolDefinition | undefined',
@@ -4880,6 +4915,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the updated Workspace projection.',
       },
       {
+        signature: '@Remote(\'deleteSession\') deleteSession(request: WorkspaceDeleteSessionRequest): Promise<WorkspaceDeleteValue>',
+        description: 'Permanently remove a Session after the caller confirms deletion.',
+        parameters: [{ name: 'request', description: 'identity of the confirmed session.' }],
+        returns: 'the durable deletion acknowledgement.',
+      },
+      {
         signature: '@Remote(\'archiveSession\') archiveSession(request: WorkspaceArchiveSessionRequest): Promise<WorkspaceArchiveValue>',
         description: 'Hide one known Session from Workspace grouping surfaces.',
         parameters: [{ name: 'request', description: 'Session identity to archive.' }],
@@ -4986,9 +5027,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'a fresh ordered array of workspace entities.',
       },
       {
-        signature: 'delete(id: WorkspaceId): Promise<boolean>',
-        description: 'Delete one workspace registration while retaining its directory and every session log. The durable order is updated before the table deletion; a failed table write restores the prior order and keeps the entity published. Unknown ids are an idempotent no-op for domain callers.',
-        parameters: [{ name: 'id', description: 'Workspace registration to remove.' }],
+        signature: 'delete(id: WorkspaceId, options: { deleteSessions?: boolean } = {}): Promise<boolean>',
+        description: 'Delete one workspace registration while retaining its directory. Session logs are retained unless deleteSessions is explicitly requested. The durable order is updated before the table deletion; a failed table write restores the prior order and keeps the entity published. Unknown ids are an idempotent no-op for domain callers.',
+        parameters: [{ name: 'id', description: 'Workspace registration to remove.' }, { name: 'options', description: 'whether to also delete the registered sessions and their histories.' }],
         returns: '`true` when a record was deleted, `false` when it was unknown.',
       },
       {
@@ -5002,6 +5043,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Archive one session durably. The session must exist (live or in session persistence); its workspace accounting — or lack of one — is irrelevant. Without `stopActivity` the session must also be inactive: the `workspace/session-activity` waterfall is asked once, and any reported activity rejects with WorkspaceActiveSessionError before anything is written. With `stopActivity` the archive is written without an activity check, and the `workspace/session-stop` providers are then asked to stop the session\'s work: the durable archive set is what a provider\'s `agent/pre-step` gate reads, so every wake the stops induce is already blocked. Archiving drops the session\'s pin in the same durable write (pinning and archival are mutually exclusive). An already archived id resolves without writing, asking, or stopping.',
         parameters: [{ name: 'sessionId', description: 'The session to archive.' }, { name: 'options', description: 'Whether running work is stopped instead of refusing.' }],
         returns: 'resolution after durability, any stop requests, and follow-up admission.',
+      },
+      {
+        signature: 'deleteSession(sessionId: SessionId): Promise<void>',
+        description: 'Delete a confirmed conversation tree, children first, preserving project files.',
+        parameters: [{ name: 'sessionId', description: 'root of the confirmed conversation tree.' }],
       },
       {
         signature: 'unarchiveSession(sessionId: SessionId): Promise<void>',
@@ -5191,10 +5237,10 @@ export const EVENT_API: readonly EventApiEntry[] = [
   {
     name: 'api-session/removed',
     mode: 'emit',
-    signature: '\'api-session/removed\'(sessionId: SessionId): void',
-    summary: 'A Session left the live Host registry.',
-    description: 'A Session left the live Host registry.',
-    parameters: [{ name: 'sessionId', description: 'removed Session identity.' }],
+    signature: '\'api-session/removed\'(sessionId: SessionId, permanent?: boolean): void',
+    summary: 'A Session left the live Host registry or was permanently deleted.',
+    description: 'A Session left the live Host registry or was permanently deleted.',
+    parameters: [{ name: 'sessionId', description: 'removed Session identity.' }, { name: 'permanent', description: 'whether the durable log was deleted rather than unloaded.' }],
   },
   {
     name: 'api-session/status',
@@ -5565,6 +5611,14 @@ export const EVENT_API: readonly EventApiEntry[] = [
     parameters: [{ name: 'session', description: 'the session just entered and announced.' }],
   },
   {
+    name: 'session/deleted',
+    mode: 'parallel',
+    signature: '\'session/deleted\'(id: SessionId, header?: SessionHeader): void | Promise<void>',
+    summary: 'Durable log removal barrier for derived stores.',
+    description: 'Durable log removal barrier for derived stores. A retried deletion can have no header.',
+    parameters: [{ name: 'id', description: 'deleted session identity.' }, { name: 'header', description: 'original header when the durable log was still available.' }],
+  },
+  {
     name: 'session/disposed',
     mode: 'emit',
     signature: '\'session/disposed\'(this: Scoped<Session>, session: Session): void',
@@ -5835,6 +5889,14 @@ export const EVENT_API: readonly EventApiEntry[] = [
     summary: 'Admit optional follow-up work after durable archival and any stop requests.',
     description: 'Admit optional follow-up work after durable archival and any stop requests. Dispatched inside the registry\'s write queue: a listener registers its work and returns, and runs the work and any unbounded I/O afterwards. Listener failures are logged without undoing archival. Listeners own and drain their background work.',
     parameters: [{ name: 'request', description: 'newly archived Session; repeated archive requests do not dispatch.' }],
+  },
+  {
+    name: 'workspace/session-deleting',
+    mode: 'parallel',
+    signature: '\'workspace/session-deleting\'(request: SessionActivityRequest): Promise<void> | void',
+    summary: 'Release an idle live writer before permanently deleting its log.',
+    description: 'Release an idle live writer before permanently deleting its log.',
+    parameters: [{ name: 'request', description: 'session whose writer must be released.' }],
   },
   {
     name: 'workspace/session-stop',
@@ -7241,6 +7303,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface GenericResultView {\n    card: \'generic\';\n    title?: string;\n    content?: ContentBlock[];\n}',
   },
   {
+    name: 'GlobalInstructionsDocument',
+    declaration: 'export interface GlobalInstructionsDocument {\n    readonly path: string;\n    readonly content: string;\n    readonly revision: string;\n}',
+  },
+  {
     name: 'GoalActivation',
     declaration: 'export type GoalActivation = \'armed\' | \'disarmed\';',
   },
@@ -7654,7 +7720,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'LmStudioModelMetadata',
-    declaration: 'export interface LmStudioModelMetadata extends LmStudioCapabilities {\n    source: string;\n    maxContext?: number;\n    loadedContext?: number;\n    overrides?: LmStudioCapabilities;\n    verification?: Record<string, ModelVerificationResult>;\n}',
+    declaration: 'export interface LmStudioModelMetadata extends LmStudioCapabilities {\n    effortLevels?: string[];\n    source: string;\n    maxContext?: number;\n    loadedContext?: number;\n    overrides?: LmStudioCapabilities;\n    verification?: Record<string, ModelVerificationResult>;\n}',
   },
   {
     name: 'LocalAtInput',
@@ -8753,6 +8819,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type ReviewVerdict = \'approved\' | \'changes-requested\' | \'commented\' | \'dismissed\';',
   },
   {
+    name: 'Role',
+    declaration: 'export type Role = z.infer<typeof roleSchema>;',
+  },
+  {
     name: 'RpcId',
     declaration: 'export type RpcId = Branded<\'rpc-id\'>;',
   },
@@ -9509,6 +9579,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface SessionStorageMetadata {\n    readonly meta: SessionHeader;\n    readonly inheritedEventCount: SessionLogOffset;\n}',
   },
   {
+    name: 'SessionSubagentArchiveRequest',
+    declaration: 'export interface SessionSubagentArchiveRequest {\n    readonly sessionId: SessionId;\n    readonly update: SubagentArchiveUpdate;\n}',
+  },
+  {
+    name: 'SessionSubagentArchiveValue',
+    declaration: 'export type SessionSubagentArchiveValue = SubagentArchiveState;',
+  },
+  {
     name: 'SessionSummary',
     declaration: 'export interface SessionSummary {\n    readonly agentAvailable: boolean;\n    readonly formatStatus?: \'current\' | \'migration-required\';\n    readonly sessionId: SessionId;\n    readonly updatedAt: number;\n    readonly running: boolean;\n    readonly blank: boolean;\n    readonly parentSessionId?: SessionId;\n    readonly origin?: \'subagent\';\n    readonly cwd?: string;\n    readonly projections?: SessionProjectionHints;\n}',
   },
@@ -9933,6 +10011,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface SubagentActivationSpec extends Omit<SubagentStartRequest, \'label\' | \'signal\'> {\n    readonly provider: string;\n    readonly label: string;\n    readonly name?: string;\n    readonly childId?: SessionId;\n    readonly signal: AbortSignal;\n    readonly delivery: \'parent\' | \'caller\';\n}',
   },
   {
+    name: 'SubagentArchiveState',
+    declaration: 'export interface SubagentArchiveState {\n    archived: SessionId[];\n    auto: boolean;\n    names?: Record<string, string> | undefined;\n}',
+  },
+  {
+    name: 'SubagentArchiveUpdate',
+    declaration: 'export type SubagentArchiveUpdate = {\n    action: \'archiveCompleted\';\n} | {\n    action: \'restore\';\n    childId: SessionId;\n} | {\n    action: \'setAuto\';\n    enabled: boolean;\n} | {\n    action: \'rename\';\n    childId: SessionId;\n    name: string;\n};',
+  },
+  {
     name: 'SubagentCapabilities',
     declaration: 'export interface SubagentCapabilities {\n    readonly agentOptions: boolean;\n    readonly agentPreset: boolean;\n    readonly outputSchema: boolean;\n    readonly depthLimit: boolean;\n}',
   },
@@ -10002,7 +10088,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SubagentRuntime',
-    declaration: 'export class SubagentRuntime extends TypertRemoteService {\n    static Config;\n    static inject;\n    constructor(ctx: Context, private config: Config);\n    resolveMaxDepth(configured?: number | \'provider-managed\'): number | undefined;\n    startActivation(spec: SubagentActivationSpec & {\n        readonly childId: SessionId;\n    }): Promise<SubagentActivation & {\n        readonly messageId: MessageId;\n    }>;\n    startActivation(spec: SubagentActivationSpec): Promise<SubagentActivation>;\n    rootOf(caller: Agent): Agent;\n    namesOf(agent: Agent): SubagentMemberNames;\n    async resolveName(caller: Agent, name: string, signal: AbortSignal): Promise<SessionId>;\n    async waitForTreeWork(root: Agent): Promise<boolean>;\n    async sendMessage(sender: Agent, targetId: SessionId, content: ContentBlock[], options: SubagentSendMessageOptions): Promise<MessageId>;\n    interrupt(targetSessionId: SessionId, authority: SubagentInterruptAuthority): void;\n    async drainDescendants(parents: readonly Agent[]): Promise<void>;\n    listDescendants(rootSessionId: SessionId, signal?: AbortSignal): Promise<SubagentDescendantListEntry[]>;\n    @Remote({ name: \'prompt\', resources: { session: request => request.childSessionId } })\n    async prompt(request: SubagentPromptRequest, signal: AbortSignal): Promise<SubagentPromptReceipt>;\n    @Remote({ name: \'interruptByUser\', resources: { session: childSessionId => childSessionId } })\n    interruptByUser(childSessionId: SessionId): SubagentInterruptReceipt;\n  /* …truncated — full shape in source */',
+    declaration: 'export class SubagentRuntime extends TypertRemoteService {\n    static Config;\n    static inject;\n    constructor(ctx: Context, private config: Config);\n    updateArchive(parent: Session, update: SubagentArchiveUpdate): Promise<SubagentArchiveState>;\n    resolveMaxDepth(configured?: number | \'provider-managed\'): number | undefined;\n    startActivation(spec: SubagentActivationSpec & {\n        readonly childId: SessionId;\n    }): Promise<SubagentActivation & {\n        readonly messageId: MessageId;\n    }>;\n    startActivation(spec: SubagentActivationSpec): Promise<SubagentActivation>;\n    rootOf(caller: Agent): Agent;\n    namesOf(agent: Agent): SubagentMemberNames;\n    async resolveName(caller: Agent, name: string, signal: AbortSignal): Promise<SessionId>;\n    async waitForTreeWork(root: Agent): Promise<boolean>;\n    async sendMessage(sender: Agent, targetId: SessionId, content: ContentBlock[], options: SubagentSendMessageOptions): Promise<MessageId>;\n    interrupt(targetSessionId: SessionId, authority: SubagentInterruptAuthority): void;\n    async drainDescendants(parents: readonly Agent[]): Promise<void>;\n    listDescendants(rootSessionId: SessionId, signal?: AbortSignal): Promise<SubagentDescendantListEntry[]>;\n    @Remote({ name: \'prompt\', resources: { session: request => request.childSessionId } })\n    async prompt(request: SubagentPromptRequest, signal: AbortSignal): Promise<SubagentPromptReceipt>;\n    @Remote({ name: \'interruptByUser\', resources: { session: childSessionId  /* …truncated — full shape in source */',
   },
   {
     name: 'SubagentSendMessageOptions',
@@ -10374,7 +10460,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ToolExecutor',
-    declaration: 'export interface ToolExecutor {\n    readonly sections?: readonly ToolPromptSection[];\n    describe(tools: readonly ToolDefinition[]): ToolModelInput;\n    execute(input: ToolBatchInput): Promise<ToolBatchResult>;\n}',
+    declaration: 'export interface ToolExecutor {\n    readonly sections?: readonly ToolPromptSection[];\n    describe(tools: readonly ToolDefinition[], context?: {\n        scope?: object;\n        contextWindow?: number;\n    }): ToolModelInput;\n    execute(input: ToolBatchInput): Promise<ToolBatchResult>;\n}',
   },
   {
     name: 'ToolFailure',
@@ -10454,7 +10540,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ToolsService',
-    declaration: 'export class ToolsService extends Service {\n    static inject;\n    static Config;\n    constructor(ctx: Context);\n    register(definition: ToolDefinition, options: ToolRegistrationOptions = {}): () => void;\n    restrict(filter: ToolRestriction): () => void;\n    get(name: string, scope?: ScopeKey, toolSet?: ResolvedToolSet): ToolDefinition | undefined;\n    executable(name: string, scope?: ScopeKey, toolSet?: ResolvedToolSet): ToolDefinition | undefined;\n    async resolve(context: ToolActivationContext): Promise<ResolvedToolSet>;\n    definitions(scope?: ScopeKey, toolSet?: ResolvedToolSet): readonly ToolDefinition[];\n    schemas(scope?: ScopeKey, toolSet?: ResolvedToolSet): ToolSchema[];\n    setExecutor(executor: ToolExecutor): () => void;\n    async execute(input: ToolBatchInput): Promise<ToolBatchResult>;\n    guard(guard: ToolGuard): () => void;\n    checkGuards(exec: ToolExecution): ToolGuardDenial | undefined;\n}',
+    declaration: 'export class ToolsService extends Service {\n    static inject;\n    static Config;\n    constructor(ctx: Context);\n    register(definition: ToolDefinition, options: ToolRegistrationOptions = {}): () => void;\n    restrict(filter: ToolRestriction): () => void;\n    get(name: string, scope?: ScopeKey, toolSet?: ResolvedToolSet): ToolDefinition | undefined;\n    adaptPresentation(schemas: readonly ToolSchema[], scope: ScopeKey, toolSet: ResolvedToolSet, contextWindow: number): ToolSchema[];\n    executable(name: string, scope?: ScopeKey, toolSet?: ResolvedToolSet): ToolDefinition | undefined;\n    async resolve(context: ToolActivationContext): Promise<ResolvedToolSet>;\n    definitions(scope?: ScopeKey, toolSet?: ResolvedToolSet): readonly ToolDefinition[];\n    schemas(scope?: ScopeKey, toolSet?: ResolvedToolSet): ToolSchema[];\n    setExecutor(executor: ToolExecutor): () => void;\n    async execute(input: ToolBatchInput): Promise<ToolBatchResult>;\n    guard(guard: ToolGuard): () => void;\n    checkGuards(exec: ToolExecution): ToolGuardDenial | undefined;\n}',
   },
   {
     name: 'ToolUpdate',
@@ -10962,7 +11048,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'WorkspaceDeleteRequest',
-    declaration: 'export interface WorkspaceDeleteRequest {\n    readonly workspaceId: WorkspaceId;\n}',
+    declaration: 'export interface WorkspaceDeleteRequest {\n    readonly workspaceId: WorkspaceId;\n    readonly deleteSessions?: boolean;\n}',
+  },
+  {
+    name: 'WorkspaceDeleteSessionRequest',
+    declaration: 'export interface WorkspaceDeleteSessionRequest {\n    readonly sessionId: SessionId;\n}',
   },
   {
     name: 'WorkspaceDeleteValue',

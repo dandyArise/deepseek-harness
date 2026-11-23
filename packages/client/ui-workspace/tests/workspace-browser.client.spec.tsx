@@ -175,7 +175,7 @@ describe('WorkspaceBrowser', () => {
     const deleteSession = vi.fn().mockRejectedValueOnce(new Error('Session is busy')).mockResolvedValueOnce(undefined)
     const b = mount({ deleteSession })
     const target = { action: 'deleteSession' as const, sessionId: sid('temporary'), displayTitle: 'Temporary session' }
-    const open = () => act(() => { b.request.set(target) })
+    const open = () => { act(() => { b.request.set(target) }) }
     const confirm = () => fireEvent.click(screen.getByRole('button', { name: t('delete.session') }))
     open()
     expect(screen.getByRole('dialog').textContent).toContain('Temporary session')
@@ -186,7 +186,7 @@ describe('WorkspaceBrowser', () => {
     confirm()
     expect((await screen.findByRole('alert')).textContent).toBe('Session is busy')
     confirm()
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await waitFor(() => { expect(screen.queryByRole('dialog')).toBeNull() })
     expect(deleteSession.mock.calls).toEqual([[target.sessionId], [target.sessionId]])
   })
 
@@ -2568,7 +2568,7 @@ describe('WorkspaceBrowser', () => {
     await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe('denied') })
   })
 
-  it('confirms Workspace deletion, explains retention, and blocks duplicate submission', async () => {
+  it('confirms permanent Workspace and conversation deletion, preserves project files, and blocks duplicate submission', async () => {
     let resolveDelete!: () => void
     const deleteWorkspace = vi.fn(() => new Promise<void>((resolve) => { resolveDelete = resolve }))
     const browser = mount({
@@ -2577,9 +2577,9 @@ describe('WorkspaceBrowser', () => {
     })
     browser.openDialog(wid('alpha'), 'Alpha', 'delete')
     const dialog = screen.getByRole('dialog', { name: '删除工作区' })
-    expect(dialog.textContent).toContain('将把“Alpha”从工作区列表中移除')
-    expect(dialog.textContent).toContain('文件夹与会话记录会保留')
-    expect(dialog.textContent).toContain('其会话将显示在“未分组”下')
+    expect(dialog.textContent).toContain('永久删除“Alpha”及其所有会话和历史记录')
+    expect(dialog.textContent).toContain('此操作无法撤销')
+    expect(dialog.textContent).toContain('项目文件将保留在磁盘上')
 
     const confirm = screen.getByRole<HTMLButtonElement>('button', { name: '删除工作区' })
     fireEvent.click(confirm)

@@ -152,7 +152,11 @@ export class WorkspaceController extends TypertRemoteService {
     return this.commands.insertSessionBefore(request)
   }
 
-  /** Permanently remove a Session after the caller confirms deletion. */
+  /**
+   * Permanently remove a Session after the caller confirms deletion.
+   * @param request - identity of the confirmed session.
+   * @returns the durable deletion acknowledgement.
+   */
   @Remote('deleteSession')
   deleteSession(request: WorkspaceDeleteSessionRequest): Promise<WorkspaceDeleteValue> {
     return this.commands.deleteSession(request)

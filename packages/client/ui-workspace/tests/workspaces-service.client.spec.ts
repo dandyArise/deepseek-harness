@@ -1427,7 +1427,7 @@ describe('UiWorkspaceService', () => {
   it('forgets a deleted saved conversation on startup', async () => {
     const saved = persistSelection({ sessionId: sid('deleted') })
     bench({ sessions: sessionState(), workspaces: workspaceState() })
-    await vi.waitFor(() => expect(JSON.parse(saved.get('dsh.sessions.current')!)).toEqual({}))
+    await vi.waitFor(() => { expect(JSON.parse(saved.get('dsh.sessions.current')!)).toEqual({}) })
   })
 
   it('does not let a pending startup Workspace replace a manual Session selection', async () => {

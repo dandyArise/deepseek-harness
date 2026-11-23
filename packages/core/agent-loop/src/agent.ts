@@ -449,6 +449,9 @@ export class ReactLoopAgent implements Agent {
     let firstAttempt = true
     while (true) {
       const { config, preparedCall } = await this.prepareRequest(turn, step, decision.selection, signal)
+      if (preparedCall?.context) {
+        assembly.tools = this.loopCtx.tools.adaptPresentation(assembly.tools, this, decision.toolSet, preparedCall.context.contextWindow)
+      }
       const currentContext = this.loopCtx.systemPrompt.refreshContext(assembly, {
         ...assembleContextFor(this, signal), modelSelection: decision.selection,
       })

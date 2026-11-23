@@ -8,6 +8,8 @@ kind: "package-library"
 
 ## Summary
 
+私有的 `./kernels` 导出还提供可选的 Rust/WASM 帧索引与压力算术。参见[测量实验](rust-kernels/README.zh.md)。默认不启用；它既不替代原生 Zstandard，也不改变权限或持久化格式。
+
 使用 Linux `landlock-run` 可执行文件限制子进程，或通过 `./flock` 入口获取 POSIX 写锁。平台包包含预编译二进制；消费方安装时不会构建原生代码。Landlock 策略与会话生命周期仍由调用方负责。
 
 ## Table of Contents

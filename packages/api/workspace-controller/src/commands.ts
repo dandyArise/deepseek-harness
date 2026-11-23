@@ -154,6 +154,11 @@ export class WorkspaceCommands {
     return { workspace: workspaceView(workspace) }
   }
 
+  /**
+   * Delete a session through the registry, reporting active work as a remote error.
+   * @param request - identity of the session to delete.
+   * @returns acknowledgement after durable deletion.
+   */
   async deleteSession(request: WorkspaceDeleteSessionRequest): Promise<WorkspaceDeleteValue> {
     try {
       await this.ctx.workspaceRegistry.deleteSession(request.sessionId)

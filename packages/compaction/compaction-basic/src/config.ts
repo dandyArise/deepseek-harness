@@ -6,6 +6,7 @@
 
 import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import { deepFreeze } from '@deepseek-ai/dsh-util-values'
+import { rustPressureThreshold } from '@deepseek-ai/node-addon-system/kernels'
 import type {
   BasicCompactionConfig,
   CompactionPolicyConfig,
@@ -195,7 +196,8 @@ export function resolveCompactSpec(
       + 'compaction headroomTokens, or configure a larger adapter model contextWindow',
     )
   }
-  const thresholdTokens = Math.floor(Math.min(
+  const thresholdTokens = rustPressureThreshold(contextWindow, reservedCompletionTokens, policy.thresholdRatio,
+    policy.headroomTokens, policy.fixedHeadroom ?? false) ?? Math.floor(Math.min(
     contextWindow * policy.thresholdRatio,
     pressureBudgetTokens,
   ))

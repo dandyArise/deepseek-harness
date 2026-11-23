@@ -63,7 +63,12 @@ declare module '@deepseek-ai/cordis' {
      * @mode emit
      */
     'session/disposed'(this: Scoped<Session>, session: Session): void
-    /** Durable log removal barrier for derived stores. A retried deletion can have no header. @mode parallel */
+    /**
+     * Durable log removal barrier for derived stores. A retried deletion can have no header.
+     * @mode parallel
+     * @param id - deleted session identity.
+     * @param header - original header when the durable log was still available.
+     */
     'session/deleted'(id: SessionId, header?: SessionHeader): void | Promise<void>
     /**
      * Post-commit, fire-and-forget append feed. The listener snapshot resolves

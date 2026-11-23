@@ -104,6 +104,57 @@ describe('threshold escalation', () => {
 })
 
 describe('chain semantics', () => {
+  it('optionally advises on repeated acknowledgements without vetoing different useful arguments', async () => {
+    const ctx = await harness({ sameResultThreshold: 3 })
+    const adapter = new MockAdapter([
+      ...Array.from({ length: 5 }, (_, i) => toolCallResponse(`p${i}`, 'probe', { file: `file${i}` })), textResponse('done'),
+    ])
+    ctx.llm.registerAdapter(['mock'], adapter)
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('ack'), { provider: 'mock', model: 'mock' })
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await waitForIdle(ctx, agent)
+    const results = agent.session.snapshotEvents().filter(e => e.type === 'tool/result')
+    expect(results).toHaveLength(5)
+    expect(results.every(e => !e.data.message.isError)).toBe(true)
+    expect(reminders(agent)).toHaveLength(1)
+    expect(reminders(agent)[0]?.text).toContain('despite changed arguments')
+  })
+
+  it('lets repeated useful polling execute without reminders when results change', async () => {
+    const ctx = await harness()
+    let calls = 0
+    ctx.tools.register(defineContentToolFixture({ name: 'poll', description: 'poll progress', parameters: {},
+      async execute() { return [{ type: 'text', text: `progress ${++calls}` }] },
+    }))
+    const adapter = new MockAdapter([
+      ...Array.from({ length: 8 }, (_, i) => toolCallResponse(`p${i}`, 'poll', {})), textResponse('done'),
+    ])
+    ctx.llm.registerAdapter(['mock'], adapter)
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('progress'), { provider: 'mock', model: 'mock' })
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await waitForIdle(ctx, agent)
+    expect(calls).toBe(8)
+    expect(reminders(agent)).toHaveLength(0)
+  })
+
+  it('resets repetition after new results and never vetoes repeated calls', async () => {
+    const ctx = await harness()
+    let calls = 0
+    ctx.tools.register(defineContentToolFixture({ name: 'poll', description: 'poll progress', parameters: {},
+      async execute() { return [{ type: 'text', text: ++calls <= 2 ? 'pending' : 'ready' }] },
+    }))
+    const adapter = new MockAdapter([
+      ...Array.from({ length: 5 }, (_, i) => toolCallResponse(`p${i}`, 'poll', {})), textResponse('done'),
+    ])
+    ctx.llm.registerAdapter(['mock'], adapter)
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('reset'), { provider: 'mock', model: 'mock' })
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await waitForIdle(ctx, agent)
+    expect(calls).toBe(5)
+    expect(reminders(agent)).toHaveLength(1)
+    expect(reminders(agent)[0]?.source).toEqual(guardSource('poll', 3))
+  })
+
   it('caps the detailed reminder arguments at argumentsPreviewChars (detection still keys on the full string)', async () => {
     const ctx = await harness({ thresholds: [2, 3], argumentsPreviewChars: 24 })
     const bigPayload = 'x'.repeat(400)

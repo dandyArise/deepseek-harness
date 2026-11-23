@@ -112,7 +112,7 @@ export class ToolsService extends Service {
     super(ctx, 'tools')
     ctx.systemPrompt.tools(({ scope, toolSet }) => {
       const executor = this.selectExecutor(scope)
-      const description = executor.describe(this.definitions(scope, toolSet))
+      const description = executor.describe(this.definitions(scope, toolSet), { ...(scope && { scope }) })
       return { ...description, knownNames: description.knownNames ?? [...this.view(scope).knownNames] }
     })
   }
@@ -238,6 +238,23 @@ export class ToolsService extends Service {
    */
   get(name: string, scope?: ScopeKey, toolSet?: ResolvedToolSet): ToolDefinition | undefined {
     return toolSet === undefined ? this.view(scope).visible.get(name) : toolSet.view(scope).get(name)
+  }
+
+  /**
+   * Adapt only executor-owned schemas using the already frozen model capacity.
+   * @param schemas - assembled model-facing schemas, including other contributors.
+   * @param scope - agent owning the visible definitions and executor.
+   * @param toolSet - frozen tool admission for this step.
+   * @param contextWindow - resolved context capacity in tokens.
+   * @returns schemas with only executor-owned entries replaced.
+   */
+  adaptPresentation(schemas: readonly ToolSchema[], scope: ScopeKey, toolSet: ResolvedToolSet, contextWindow: number): ToolSchema[] {
+    const definitions = this.definitions(scope, toolSet)
+    const executor = this.selectExecutor(scope)
+    const before = executor.describe(definitions, { scope })
+    const owned = new Set(before.schemas.map(tool => tool.name))
+    const after = executor.describe(definitions, { scope, contextWindow })
+    return [...schemas.filter(tool => !owned.has(tool.name)), ...after.schemas]
   }
 
   /**

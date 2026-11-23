@@ -6,7 +6,18 @@ import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime, { userAgent } from '@deepseek-ai/dsh-llm'
 import * as LlmPiAi from '@deepseek-ai/dsh-llm-pi-ai'
 import { getBuiltinModels } from '@earendil-works/pi-ai/providers/all'
-import { discoverModels } from '../src/discovery.ts'
+import { discoverModels, readLmStudioModels } from '../src/discovery.ts'
+
+it.each([false, true])('resolves short native IDs only when unambiguous (ambiguous: %s)', async (ambiguous) => {
+  const row = (key: string) => ({ key, type: 'llm', max_context_length: 131072,
+    loaded_instances: [{ id: key, config: { context_length: 8192 } }] })
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ models: [
+    row('meta/muse-glimmer'), ...ambiguous ? [row('other/muse-glimmer')] : [],
+  ] })))
+  const models = await readLmStudioModels('http://localhost:1234/v1/models', new Headers(), [{ id: 'muse-glimmer' }])
+  expect(models?.[0]?.id).toBe('muse-glimmer')
+  expect(models?.[0]?.lmStudio?.loadedContext).toBe(ambiguous ? undefined : 8192)
+})
 
 const servers: Server[] = []
 /** Credential variables a test set, cleared so the next one starts unset. */
@@ -115,6 +126,16 @@ describe('catalog-route model discovery', () => {
 })
 
 describe('draft-provider model discovery', () => {
+  it('uses loaded alias capacity for the model key and the exact capacity for each instance', async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(Response.json({ data: ['glimmer-v7', 'worker-a', 'worker-b'].map(id => ({ id, owned_by: 'organization_owner' })) }))
+      .mockResolvedValueOnce(Response.json({ models: [{ key: 'glimmer-v7', type: 'llm', max_context_length: 131072,
+        loaded_instances: [{ id: 'worker-a', config: { context_length: 8192 } }, { id: 'worker-b', config: { context_length: 32768 } }] }] }))
+    vi.stubGlobal('fetch', fetch)
+    const models = await discoverModels({ baseURL: 'http://localhost:1234/v1' })
+    expect(models.map(model => model.contextWindow)).toEqual([8192, 8192, 32768])
+    expect(models[0]?.lmStudio).toMatchObject({ loadedContext: 8192, maxContext: 131072 })
+  })
+
   it('joins native LM Studio facts to served ids without loading models', async () => {
     const rows = ['opaque', 'alias', 'other', 'embed'].map(id => ({ id, owned_by: 'organization_owner' }))
     const native = { models: [

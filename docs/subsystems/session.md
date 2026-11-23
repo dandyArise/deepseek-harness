@@ -2,6 +2,8 @@
 
 English | [中文](session.zh.md)
 
+`SessionSubagentArchiveRequest` addresses a parent with `sessionId` and an `update` operation; `SessionSubagentArchiveValue` returns its `SubagentArchiveState`. These [request types](../../packages/api/session-controller/src/types.ts) delegate archive ownership to the [subagent service](subagent.md), without changing child conversations or token accounting.
+
 The in-memory, event-sourced model of [dsh-session](../../packages/core/session). A `Session` is an **append-only log** of typed `SessionEvent`s — the single source of truth for an agent's whole interaction history. The LLM message history is *derived* from the log, never stored separately; replay is re-derivation from the same events. How the log is made **durable** (the persistence seam, backends, crash recovery) is the sibling concern on [persistence.md](persistence.md).
 
 Source: [`packages/core/session/src/types.ts`](../../packages/core/session/src/types.ts)
@@ -967,6 +969,13 @@ workspaceDesktop(): { name: string; available: boolean; fileManager: 'finder' | 
 @Remote('rename') rename(request: SessionRenameRequest): Promise<SessionRenameValue>
 
 /**
+ * Update the direct-child archive owned by the addressed ordinary parent.
+ * @param request - parent session and requested archive operation.
+ * @returns the resulting archive state.
+ */
+@Remote('updateSubagentArchive') async updateSubagentArchive(request: SessionSubagentArchiveRequest): Promise<SessionSubagentArchiveValue>
+
+/**
  * Fork one cold-readable exact event prefix into a new Session. An omitted
  * boundary selects the latest completed-turn prefix; an open cut receives
  * synthetic fork closers.
@@ -1316,15 +1325,16 @@ Source: [`packages/api/session-controller/src/types.ts`](../../packages/api/sess
 
 #### `api-session/removed` — emit
 
-A Session left the live Host registry.
+A Session left the live Host registry or was permanently deleted.
 
 ```ts cordis-catalog
 /**
- * A Session left the live Host registry.
+ * A Session left the live Host registry or was permanently deleted.
  * @mode emit
  * @param sessionId - removed Session identity.
+ * @param permanent - whether the durable log was deleted rather than unloaded.
  */
-'api-session/removed'(sessionId: SessionId): void
+'api-session/removed'(sessionId: SessionId, permanent?: boolean): void
 ```
 
 Types: [SessionId](core.md)
@@ -1378,6 +1388,26 @@ Read-only creation announcement after store entry. New events reject until every
 ```
 
 Types: [Scoped](scope.md)
+
+Source: [`packages/core/session/src/index.ts`](../../packages/core/session/src/index.ts)
+
+<a id="sessiondeleted--parallel"></a>
+
+#### `session/deleted` — parallel
+
+Durable log removal barrier for derived stores. A retried deletion can have no header.
+
+```ts cordis-catalog
+/**
+ * Durable log removal barrier for derived stores. A retried deletion can have no header.
+ * @mode parallel
+ * @param id - deleted session identity.
+ * @param header - original header when the durable log was still available.
+ */
+'session/deleted'(id: SessionId, header?: SessionHeader): void | Promise<void>
+```
+
+Types: [SessionHeader](persistence.md) · [SessionId](core.md)
 
 Source: [`packages/core/session/src/index.ts`](../../packages/core/session/src/index.ts)
 

@@ -9,6 +9,7 @@ import {
   constants, zstdCompress, zstdDecompress, type ZstdOptions,
 } from 'node:zlib'
 import { promisify } from 'node:util'
+import { rustScanFrames } from '@deepseek-ai/node-addon-system/kernels'
 import { NodePrivateZstdFrameDecoder } from './zstd-private-decoder.ts'
 import { PublicZstdFrameDecoder } from './zstd-public-decoder.ts'
 
@@ -46,6 +47,8 @@ export interface ZstdFrameScan {
  * @returns complete frame ranges and an optional incomplete-final-frame start.
  */
 export function scanZstdFrames(buffer: Buffer, maxFrames = Number.POSITIVE_INFINITY): ZstdFrameScan {
+  const native = rustScanFrames(buffer, maxFrames)
+  if (native !== undefined) return native
   const frames: ZstdFrameRange[] = []
   let offset = 0
 

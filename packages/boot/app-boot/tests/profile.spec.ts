@@ -503,6 +503,24 @@ describe('composeEntries', () => {
 })
 
 describe('createRuntimeResolution', () => {
+  it('captures installation symlink targets per resolution generation', async () => {
+    const anchor = stageInstallation({})
+    const link = join(dirname(anchor), 'node_modules', 'linked')
+    const firstTarget = tmp()
+    const nextTarget = tmp()
+    mkdirSync(dirname(link), { recursive: true })
+    writeFileSync(anchor, JSON.stringify({ name: 'app', dependencies: { linked: '*' } }))
+    for (const dir of [firstTarget, nextTarget]) writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'linked' }))
+    const linkKind = process.platform === 'win32' ? 'junction' : 'dir'
+    symlinkSync(firstTarget, link, linkKind)
+    const first = await createRuntimeResolution({ installAnchor: anchor, home: tmp() })
+    rmSync(link)
+    symlinkSync(nextTarget, link, linkKind)
+    const second = await first.computeLatestResolution()
+    expect(first.entries.find(entry => entry.name === 'linked')?.canonicalPackageDir).toBe(realpathSync.native(firstTarget))
+    expect(second.entries.find(entry => entry.name === 'linked')?.canonicalPackageDir).toBe(realpathSync.native(nextTarget))
+  })
+
   it('collects the app and bundle dependencies without writing profile packages', async () => {
     const anchor = stageInstallation({
       'bundle-a': { patch: '[]\n', deps: { 'dep-of-a': '0.0.0', 'ghost-dep': '0.0.0' } },

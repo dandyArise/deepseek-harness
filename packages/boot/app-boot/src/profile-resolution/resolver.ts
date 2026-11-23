@@ -8,6 +8,7 @@ import { getEnvironmentData, setEnvironmentData } from 'node:worker_threads'
 import type { ModuleLoaderV1, ModuleLoaderV2, ResolveResult } from '@deepseek-ai/cordis-plugin-loader'
 import { imports as resolvePackageImports, type Package as ResolvePackageManifest } from 'resolve.exports'
 import type { RuntimeResolutionEntry, RuntimeResolution } from '../profile.ts'
+import { realModuleDirectory } from './legacy-links.ts'
 
 const WORKER_RESOLUTION_KEY = '@deepseek-ai/dsh-app-boot/profile-resolution'
 const EMPTY_ATTRIBUTES: ImportAttributes = Object.freeze({})
@@ -184,29 +185,35 @@ function realSpellings(path: string): string[] {
 
 function canonicalPath(path: string): string {
   try {
-    return realpathSync(path)
+    return process.platform === 'win32' ? realModuleDirectory(path) : realpathSync(path)
   } catch {
     // A runtime resolution may name a profile scope before that directory is materialized.
     return resolve(path)
   }
 }
 
-function prefixes(path: string): readonly string[] {
+function prefixes(path: string, realPath = canonicalPath(path)): readonly string[] {
   const configured = resolve(path) + sep
-  const canonical = canonicalPath(path) + sep
+  const canonical = realPath + sep
   return canonical === configured ? [configured] : [configured, canonical]
 }
 
 function compileResolution(resolution: RuntimeResolution): CompiledResolution {
+  const installationPaths = new Set<string>()
+  const entries = resolution.entries.map((entry) => {
+    const realDir = entry.canonicalPackageDir ?? canonicalPath(entry.packageDir)
+    if (entry.scope === 'installation') {
+      for (const path of prefixes(entry.packageDir, realDir)) installationPaths.add(path)
+    }
+    return [entry.name, { ...entry, realDir }] as const
+  })
   return {
-    entries: new Map(resolution.entries.map(entry => [entry.name, { ...entry, realDir: canonicalPath(entry.packageDir) }])),
+    entries: new Map(entries),
     profilesDir: resolution.profilesDir,
     profileDir: resolution.profileDir,
     profilePaths: prefixes(resolution.profilesDir),
     profile: resolution.profileDir === undefined ? [] : prefixes(resolution.profileDir),
-    installationPaths: [...new Set(resolution.entries
-      .filter(entry => entry.scope === 'installation')
-      .flatMap(entry => prefixes(entry.packageDir)))],
+    installationPaths: [...installationPaths],
     linkedPaths: resolution.linkedRoots.flatMap(root => prefixes(root.realPath)),
     localPackageNames: new Set(resolution.localPackageNames),
     esmRoutes: new Map(),

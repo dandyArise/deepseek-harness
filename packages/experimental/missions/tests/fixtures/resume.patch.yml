@@ -1,0 +1,3 @@
+- id: agent-loop
+  config:
+    agents: []

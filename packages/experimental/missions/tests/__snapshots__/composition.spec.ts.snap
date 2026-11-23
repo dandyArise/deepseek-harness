@@ -1,0 +1,40 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`executes a separate model through the real Loader, enforces tools and recovers its result 1`] = `
+{
+  "output": "Comparison incomplete: sources unavailable. Result recovered without repeating the work.",
+  "routes": [
+    "mission-coordinator/coordinator",
+    "mission-worker/worker",
+    "mission-worker/worker",
+    "mission-coordinator/coordinator",
+    "mission-coordinator/coordinator",
+  ],
+  "task": {
+    "childId": "<child-session>",
+    "delivery": "retrieved",
+    "endedAt": 0,
+    "output": "Sources unavailable. No verified product comparison.",
+    "reason": null,
+    "request": {
+      "acceptance": [
+        "State missing evidence.",
+      ],
+      "id": "compare",
+      "objective": "Compare three products.",
+      "role": "research",
+    },
+    "route": {
+      "model": "worker",
+      "name": "research",
+      "provider": "mission-worker",
+      "tools": [],
+    },
+    "startedAt": 0,
+    "status": "done",
+    "steps": 2,
+    "truncated": false,
+    "verification": "unverified",
+  },
+}
+`;

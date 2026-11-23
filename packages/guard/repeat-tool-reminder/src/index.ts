@@ -19,7 +19,8 @@ declare module '@deepseek-ai/dsh-llm' {
 
 import type { MessageSource } from '@deepseek-ai/dsh-llm'
 import type { UserMessage } from '@deepseek-ai/dsh-session'
-import type { PostToolDecision, ToolExecution } from '@deepseek-ai/dsh-tools'
+import type { PostToolDecision, ToolExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
+import { createHash } from 'node:crypto'
 
 export const name = 'repeat-tool-reminder'
 
@@ -47,6 +48,8 @@ export interface Config {
    * always compares the FULL canonical string).
    */
   argumentsPreviewChars?: number
+  /** Optional advisory threshold for identical outcomes despite different arguments; 0 disables it. */
+  sameResultThreshold?: number
 }
 
 export const Config: z<Config> = z.object({
@@ -54,6 +57,7 @@ export const Config: z<Config> = z.object({
   include: z.array(z.string()).default([]),
   exclude: z.array(z.string()).default([]),
   argumentsPreviewChars: z.number().default(500),
+  sameResultThreshold: z.number().default(0),
 })
 
 /**
@@ -68,10 +72,11 @@ const REMINDER_SOURCE: MessageSource = { kind: 'repeat-tool-reminder' }
  * count, so a custom first threshold keeps the gentle-then-detailed escalation.
  */
 const GENTLE_REMINDER =
-  'You are repeating the exact same tool call with identical arguments. '
+  'You are repeating the exact same tool call with identical arguments and result. '
   + 'Carefully analyze the previous result before calling again: if the task is '
   + 'not complete, try a different approach or different arguments instead of '
-  + 'repeating the call.'
+  + 'repeating the call. If a write already succeeded, proceed to the configured checks. '
+  + 'Polling may continue when waiting for an external change; use an appropriate delay.'
 
 /** The detailed later-threshold reminder naming the tool, the run length, and the canonical arguments. */
 function detailedReminder(toolName: string, count: number, canonicalArguments: string): string {
@@ -79,8 +84,7 @@ function detailedReminder(toolName: string, count: number, canonicalArguments: s
     + `- tool: ${toolName}\n`
     + `- consecutive_calls: ${count}\n`
     + `- arguments: ${canonicalArguments}\n`
-    + 'The repeated calls are not making progress. Do not call this tool with '
-    + 'these exact arguments again. Inspect the latest result and choose a '
+    + 'The calls return identical results; progress is not observable. Inspect the latest result and choose a '
     + 'different action, different arguments, or finish the task if enough '
     + 'evidence has been gathered.'
 }
@@ -159,6 +163,8 @@ function prependContext(ours: UserMessage, theirs: UserMessage[] | undefined): U
 interface Chain {
   key: string
   count: number
+  resultKey: string
+  resultCount: number
 }
 
 /**
@@ -178,6 +184,10 @@ export function apply(ctx: Context, config: Config): void {
   }
 
   const chains = new WeakMap<Agent, Chain>()
+  const sameResultThreshold = config.sameResultThreshold ?? 0
+  if (!Number.isSafeInteger(sameResultThreshold) || (sameResultThreshold !== 0 && sameResultThreshold < 3)) {
+    throw new Error('repeat-tool-reminder: sameResultThreshold must be 0 or an integer >= 3')
+  }
 
   /** Whether a tool participates in the chain (untracked calls are transparent: they neither count nor reset). */
   function tracked(toolName: string): boolean {
@@ -193,23 +203,37 @@ export function apply(ctx: Context, config: Config): void {
    * same pipeline), and a model hammering a denied call is exactly the loop
    * worth breaking.
    */
-  function observe(exec: ToolExecution): UserMessage | undefined {
+  function observe(exec: ToolExecution, result: Readonly<ToolExecutionResult>): UserMessage | undefined {
     // A direct `ctx.tools.execute()` caller has no model to remind and no id
     // to key on; only agent-loop calls participate.
     if (!exec.agent) return undefined
     if (!tracked(exec.name)) return undefined
     const canonical = canonicalize(exec.arguments)
-    const key = JSON.stringify([exec.name, canonical])
+    // Compare full canonical outcomes, not clipped previews. Different results
+    // (polling progress, updated reads, recovered failures) reset the chain.
+    // A digest keeps large file/tool outputs out of the per-agent retained state.
+    const key = createHash('sha256').update(canonicalize([
+      exec.name, exec.arguments, result.isError, result.isError ? result.error : result.value,
+    ])).digest('hex')
     const chain = chains.get(exec.agent)
     const count = chain !== undefined && chain.key === key ? chain.count + 1 : 1
-    chains.set(exec.agent, { key, count })
-    if (!thresholdSet.has(count)) return undefined
-    const text = count === thresholds[0]
-      ? GENTLE_REMINDER
-      : detailedReminder(exec.name, count, previewArguments(canonical, argumentsPreviewChars))
+    const resultKey = createHash('sha256').update(canonicalize([
+      exec.name, result.isError, result.isError ? result.error : result.value,
+    ])).digest('hex')
+    const resultCount = chain?.resultKey === resultKey ? chain.resultCount + 1 : 1
+    chains.set(exec.agent, { key, count, resultKey, resultCount })
+    const sameResult = sameResultThreshold > 0 && resultCount === sameResultThreshold
+    if (!thresholdSet.has(count) && !sameResult) return undefined
+    const text = sameResult && !thresholdSet.has(count)
+      ? `The last ${resultCount} calls to ${exec.name} returned the same result despite changed arguments. `
+        + 'An acknowledgement alone does not verify progress. If the write succeeded, run the configured checks next; '
+        + 'do not keep rewriting equivalent content. Continue useful calls or polling when needed; no call is blocked.'
+      : count === thresholds[0]
+        ? GENTLE_REMINDER
+        : detailedReminder(exec.name, count, previewArguments(canonical, argumentsPreviewChars))
     return createUserMessage({
       content: [{ type: 'text', text }],
-      source: { ...REMINDER_SOURCE, form: 'notice', summary: `${exec.name} × ${count}` },
+      source: { ...REMINDER_SOURCE, form: 'notice', summary: `${exec.name} × ${sameResult ? resultCount : count}` },
     })
   }
 
@@ -217,8 +241,8 @@ export function apply(ctx: Context, config: Config): void {
   // the downstream outcome), DELEGATE so a later listener can still block or
   // replace, then fold the reminder onto whatever came back — additionalContexts
   // rides both decision variants, so a blocked call still gets the nudge.
-  ctx.on('tools/post-execute', async (exec, _result, next): Promise<PostToolDecision> => {
-    const reminder = observe(exec)
+  ctx.on('tools/post-execute', async (exec, result, next): Promise<PostToolDecision> => {
+    const reminder = observe(exec, result)
     const downstream = await next()
     if (!reminder) return downstream
     return { ...downstream, additionalContexts: prependContext(reminder, downstream.additionalContexts) }

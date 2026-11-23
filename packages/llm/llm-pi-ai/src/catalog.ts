@@ -603,6 +603,7 @@ function assertOfferedCompatFields(
 
 /** One configured model entry: an id plus the catalog fields it overrides. */
 export interface PiAiModelProfile {
+  /** Imported capabilities, loaded context and manual overrides for LM Studio. */
   lmStudio?: LmStudioModelMetadata
   /** Model id sent to the provider and accepted by {@link GenerateOptions.model}. */
   id: string

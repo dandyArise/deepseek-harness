@@ -25,6 +25,8 @@ Use `dsh-subagent` to delegate work through named providers and collect managed 
 <a id="use-this-package"></a>
 ## Use this package
 
+`updateArchive` also accepts `{ action: 'rename', childId, name }` for a direct local child. It trims and validates a 1–200 character display label and persists it in the parent's `subagent/popup-archive` log. The optional `names` map keeps older logs/checkpoints compatible. This never changes routing names, child history, or measured tokens; labels survive archiving and restoration.
+
 Each start accepts an optional `cwd`; relative paths resolve against the parent's current working directory, and omission captures that current directory. The child keeps its parent's origin metadata and permission roots. A child-owned directory value follows any inherited history, survives continuation and restart, and is independent of later parent changes.
 
 This package is the contract every delegation setup shares. You enable it by mounting the service together with one or more provider backends and the model-facing delegation tool; from then on, an agent can delegate work and the service routes each request to the named provider.

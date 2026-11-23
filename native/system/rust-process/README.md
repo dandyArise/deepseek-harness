@@ -1,5 +1,7 @@
 # Windows process cleanup in Rust
 
+English | [中文](README.zh.md)
+
 Optional Windows-only DLL used by subprocess-local for process identity/liveness
 and forceful terminal tree cleanup. Enable with an absolute
 `DANDY_WINDOWS_PROCESS_DLL` path. Without it, the existing implementation stays in

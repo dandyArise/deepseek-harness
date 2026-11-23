@@ -623,6 +623,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
     pkg: '@deepseek-ai/dsh-tool-subagent-control',
     dir: 'tool-subagent-control',
     source: {
+      archive_completed_agents: 'packages/subagent/tool-subagent-control/src/index.ts',
       interrupt_agent: 'packages/subagent/tool-subagent-control/src/index.ts',
       list_agents: 'packages/subagent/tool-subagent-control/src/list-agents.ts',
       send_message: 'packages/subagent/tool-subagent-control/src/index.ts',

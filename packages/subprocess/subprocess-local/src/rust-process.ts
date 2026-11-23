@@ -11,7 +11,10 @@ interface RustProcess {
   terminate(identity: ProcessIdentity): void
 }
 
-/** Explicit local opt-in; bad configuration fails closed, not through taskkill. */
+/**
+ * Explicit local opt-in; bad configuration fails closed, not through taskkill.
+ * @returns the configured Rust backend, or undefined on other platforms or without opt-in.
+ */
 export function rustProcess(): RustProcess | undefined {
   const path = process.env.DANDY_WINDOWS_PROCESS_DLL
   if (process.platform !== 'win32' || !path) return undefined

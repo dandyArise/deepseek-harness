@@ -1,0 +1,13 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write native/system/rust-kernels/README.md
+/dandy-rust-kernels-measured-opt-in:
+  en: 50ae4bb2c7052804
+  zh: 4d1c6ad7b2a33ad6
+/dandy-rust-kernels-measured-opt-in/build-and-compare:
+  en: 391b45d64ac442e3
+  zh: 1c6dab4e53c1a26b
+/dandy-rust-kernels-measured-opt-in/measurements-20-november-2026:
+  en: 53447013bc19fcdb
+  zh: ae7cc483b7a3e57c

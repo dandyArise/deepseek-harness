@@ -38,6 +38,19 @@ declare module '@deepseek-ai/cordis' {
 
 const TELEMETRY_ROW_ID = 'session-telemetry-otel'
 
+const startupLayers = new WeakMap<ProfileContext, readonly PatchOptions[][]>()
+
+/**
+ * Consume the two user patch layers actually composed at launch for the first HMR watcher.
+ * @param context - profile identity owning the cached startup layers.
+ * @returns the layers once, or undefined when absent or already consumed.
+ */
+export function takeStartupPatchLayers(context: ProfileContext): readonly PatchOptions[][] | undefined {
+  const layers = startupLayers.get(context)
+  startupLayers.delete(context)
+  return layers
+}
+
 /**
  * Resolve the telemetry opt-out switch into its boot patch. ANY non-empty
  * value (including `'0'`/`'false'`) disables: a privacy switch prefers
@@ -72,10 +85,12 @@ export function readBundlePatches(binName: string, context: ProfileContext, init
  * @returns Detached ordered patches; this function does not update the Loader.
  */
 export function readProfilePatches(binName: string, context: ProfileContext, initialProfile?: Profile): PatchOptions[] {
+  const bundles = readBundlePatches(binName, context, initialProfile)
+  const local = initialProfile?.patches ?? loadOptionalPatches(binName, context.patchPath) ?? []
+  const home = loadOptionalPatches(binName, join(context.home, PROFILE_PATCH_FILENAME)) ?? []
+  if (initialProfile !== undefined) startupLayers.set(context, [local, home])
   const patches = structuredClone([
-    ...readBundlePatches(binName, context, initialProfile),
-    ...(initialProfile?.patches ?? loadOptionalPatches(binName, context.patchPath) ?? []),
-    ...(loadOptionalPatches(binName, join(context.home, PROFILE_PATCH_FILENAME)) ?? []),
+    ...bundles, ...local, ...home,
     ...context.overlays,
   ])
   const telemetryPatch = resolveTelemetryPatch(context.telemetryDisabledEnv,

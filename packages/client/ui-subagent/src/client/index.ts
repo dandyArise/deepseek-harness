@@ -57,6 +57,14 @@ export function apply(ctx: ClientContext): void {
     registerSidebarChat(scope, ctx.locale.bind(NS))
   })
   const catalogActions = (parentSessionId: SessionId): SubagentCatalogInjected => ({
+    async renameAgent(address, title) {
+      await ctx.sessions.using(parentSessionId, { source: 'sidebarChat' }, async (reference) => {
+        const { session } = await reference.ready
+        const result = await session.updateSubagentArchive({ action: 'rename', childId: address.childSessionId, name: title })
+        if (!result.ok) throw new Error(result.error.message)
+      })
+      await ctx.sessions.refreshProjections(parentSessionId)
+    },
     async updateArchive(update) {
       await ctx.sessions.using(parentSessionId, { source: 'sidebarChat' }, async (reference) => {
         const { session } = await reference.ready
@@ -65,7 +73,7 @@ export function apply(ctx: ClientContext): void {
       })
       await ctx.sessions.refreshProjections(parentSessionId)
     },
-    openAgents: () => ctx.sidebarRight.openTab('agents'),
+    openAgents: () => { ctx.sidebarRight.openTab('agents') },
     async agentAction(address, action) {
       return ctx.sessions.using(address, { source: 'sidebarChat' }, async (reference) => {
         const { session, eventSource } = await reference.ready

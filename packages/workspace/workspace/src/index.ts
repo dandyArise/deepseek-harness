@@ -146,7 +146,11 @@ declare module '@deepseek-ai/cordis' {
      * @mode parallel
      */
     'workspace/session-stop'(request: SessionActivityRequest): Promise<void> | void
-    /** Release an idle live writer before permanently deleting its log. */
+    /**
+     * Release an idle live writer before permanently deleting its log.
+     * @mode parallel
+     * @param request - session whose writer must be released.
+     */
     'workspace/session-deleting'(request: SessionActivityRequest): Promise<void> | void
     /**
      * Admit optional follow-up work after durable archival and any stop requests.
@@ -325,6 +329,7 @@ export class WorkspaceRegistry extends Service {
    * failed table write restores the prior order and keeps the entity
    * published. Unknown ids are an idempotent no-op for domain callers.
    * @param id - Workspace registration to remove.
+   * @param options - whether to also delete the registered sessions and their histories.
    * @returns `true` when a record was deleted, `false` when it was unknown.
    */
   delete(id: WorkspaceId, options: { deleteSessions?: boolean } = {}): Promise<boolean> {
@@ -434,7 +439,10 @@ export class WorkspaceRegistry extends Service {
     })
   }
 
-  /** Delete a confirmed conversation tree, children first, preserving project files. */
+  /**
+   * Delete a confirmed conversation tree, children first, preserving project files.
+   * @param sessionId - root of the confirmed conversation tree.
+   */
   deleteSession(sessionId: SessionId): Promise<void> {
     return this.enqueueOperation(async () => {
       const children = new Map<SessionId, SessionId[]>()

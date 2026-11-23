@@ -45,6 +45,8 @@ kind: "package-reference"
 
 ### 「通用」分区
 
+设置还提供「Global instructions」Markdown 编辑器，用于 `$DSH_HOME/AGENTS.md`。文件不存在时显示空草稿，仅在保存时创建。保存保留原文并检查版本，拒绝覆盖较新的内容；失败时保留草稿。路径由经过身份验证的服务端 API 决定。保存不会重启 Harness；指令在新会话或恢复会话时按既有机制加载，不修改共享 agents-home 或项目指令文件。本分区支持法语和英语，其他语言暂用英语。
+
 Web 与桌面端的通用设置底部显示当前发布版本，使用构建注入的 `DSH_CLIENT_VERSION` 元数据和当前语言。缺少版本元数据的局部构建不显示该行。
 
 代码工作工具开关控制 [ui-settings](../ui-settings/README.zh.md#use-this-package) 定义的共享偏好 `ui-settings.enabled`。Web 和桌面端均提供此开关，立即跟随已接受的变更，并在写入完成前禁用重复输入。写入失败时显示本地化的重试提示。在桌面端，通过此开关做出的变更会经可选的[产品埋点](../product-analytics/README.zh.md)服务报告携带新值的 `code_work_view_toggle`，时间戳取点击时刻。只有改变已知值、且写入后偏好等于所请求值的写入才会报告；请求当前值、原值未知、写入失败以及在其他位置修改偏好均不报告。

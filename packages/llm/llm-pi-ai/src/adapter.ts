@@ -66,7 +66,7 @@ import { fetchLmStudioStream } from './lm-studio-fetch.ts'
 import { FINAL_CHANNEL_INSTRUCTION, recoverSelfChannel } from './self-channel.ts'
 import { normalizeThinkTags } from './think-tags.ts'
 import { markDevstralRequests, mergeDevstralUsers } from './devstral-payload.ts'
-import { estimateLmStudioPrompt, lmStudioOverflow, resizeLmStudioContext, waitForLmStudioResize } from './lm-studio-context.ts'
+import { estimateLmStudioPrompt, lmStudioReplyBudget, waitForLmStudioResize } from './lm-studio-context.ts'
 import { conversationUpdates, createModels, getSupportedThinkingLevels } from './models.ts'
 import { toStreamChunks } from './stream.ts'
 import { bindThinkingToPrefix } from './prefix-binding.ts'
@@ -440,7 +440,7 @@ export class PiAiAdapter extends LlmAdapter {
   ): Promise<LlmResolvedModelInfo> {
     const info = this.modelInfo(snapshot, provider, model)
     const profile = this.profileOf(snapshot, provider)
-    if (info.lmStudio?.source === '/api/v1/models' && profile.baseURL) {
+    if ((info.lmStudio || provider === 'lmstudio') && profile.baseURL) {
       await waitForLmStudioResize(profile.baseURL, model)
       const headers = new Headers(profile.headers)
       const apiKey = await this.config.resolveApiKey(provider, profile)
@@ -448,9 +448,10 @@ export class PiAiAdapter extends LlmAdapter {
       const url = profile.baseURL.replace(/\/+$/, '') + '/models'
       const live = (await readLmStudioModels(url, headers, [{ id: model }], signal))?.[0]
       if (live?.lmStudio && live.contextWindow !== undefined) {
-        const { loadedContext: _previous, ...metadata } = info.lmStudio
+        const { loadedContext: _previous, ...metadata } = info.lmStudio ?? live.lmStudio
         return {
           ...info,
+          defaultMaxTokens: Math.min(info.defaultMaxTokens ?? 2048, Math.max(1, Math.floor(live.contextWindow / 4))),
           lmStudio: { ...metadata, ...live.lmStudio.loadedContext === undefined ? {} : { loadedContext: live.lmStudio.loadedContext },
             ...live.lmStudio.maxContext === undefined ? {} : { maxContext: live.lmStudio.maxContext } },
           context: { contextWindow: live.contextWindow },
@@ -474,65 +475,25 @@ export class PiAiAdapter extends LlmAdapter {
   }
 
   private async * streamPrepared(options: GenerateOptions, snapshot: PiAiSnapshot, info: LlmResolvedModelInfo): AsyncIterable<StreamChunk> {
-    const capacity = info.lmStudio
-    const url = this.profileOf(snapshot, options.provider).baseURL
-    let window = info.context?.contextWindow
-    if (!url || !capacity?.loadedContext || !capacity.maxContext || !window || info.protocol !== 'openai-completions') {
-      yield* this.streamWithSnapshot(options, snapshot, window)
-      return
-    }
-    // maxTokens is a ceiling, sometimes the entire theoretical model window.
-    // Keep the ceiling on the request; reserve a practical response allowance for sizing.
-    const reserve = Math.min(options.maxTokens ?? 2048, 4096)
-    const estimated = estimateLmStudioPrompt(options) + reserve
-    const maxContext = capacity.maxContext
-    let preflightUnavailable = false
-    const enlarge = async (needed: number) => {
-      try { return await resizeLmStudioContext(url, options.model, needed, maxContext, options.signal) }
-      catch (error) {
-        options.signal?.throwIfAborted()
-        if (error instanceof Error && error.message.startsWith('LM Studio ')) {
-          throw new LlmError(error.message, 'CONTEXT_WINDOW_EXCEEDED', { cause: error })
-        }
-        return undefined // Optional local CLI unavailable: keep normal provider/compaction handling.
+    const window = info.lmStudio?.loadedContext
+    if (window !== undefined) {
+      const reserve = options.maxTokens ?? info.defaultMaxTokens ?? 2048
+      const estimated = estimateLmStudioPrompt(options)
+      if (estimated + reserve > window) {
+        // Route through normal durable compaction/retry before any generation
+        // request. Never resize or evict an instance owned by LM Studio.
+        throw new LlmError(`LM Studio preflight: estimated ${estimated} input tokens plus ${reserve} reply tokens exceed the loaded ${window}-token context. Compact history before retrying.`, 'CONTEXT_WINDOW_EXCEEDED')
       }
     }
-    if (estimated > window && estimated <= capacity.maxContext) {
-      const enlarged = await enlarge(estimated)
-      if (enlarged !== undefined) window = enlarged
-      else preflightUnavailable = true
-    }
-    await waitForLmStudioResize(url, options.model)
-    let emittedContent = false
-    let initialUsage: Extract<StreamChunk, { type: 'usage' }> | undefined
-    for await (const chunk of this.streamWithSnapshot(options, snapshot, window)) {
-      if (!emittedContent && chunk.type === 'usage') {
-        initialUsage = chunk
-        continue
-      }
-      if (!preflightUnavailable && !emittedContent && chunk.type === 'finish' && chunk.reason.kind === 'error') {
-        const overflow = lmStudioOverflow(chunk.reason.failure.message)
-        if (overflow && overflow.prompt + reserve > window) {
-          const actual = await enlarge(overflow.prompt + reserve)
-          if (actual !== undefined && actual > window) {
-            yield* this.streamWithSnapshot(options, snapshot, actual)
-            return
-          }
-        }
-      }
-      if (initialUsage) {
-        yield initialUsage
-        initialUsage = undefined
-      }
-      if (chunk.type !== 'usage' && chunk.type !== 'finish') emittedContent = true
-      yield chunk
-    }
+    yield* this.streamWithSnapshot(options, snapshot, info.context?.contextWindow,
+      window === undefined ? undefined : options.maxTokens ?? info.defaultMaxTokens ?? 2048)
   }
 
   private async * streamWithSnapshot(
     options: GenerateOptions,
     snapshot: PiAiSnapshot,
     contextWindow?: number,
+    admittedReplyTokens?: number,
   ): AsyncIterable<StreamChunk> {
     if (options.stop !== undefined) {
       throw new LlmError('llm-pi-ai does not support GenerateOptions.stop', 'UNSUPPORTED_OPTION')
@@ -607,14 +568,19 @@ export class PiAiAdapter extends LlmAdapter {
         this.config.onThinkingOmitted?.({ provider: options.provider, model: options.model, count })
       })
       const open = (retry: boolean, usedOutput: number) => {
-        const replyBudget = options.maxTokens ?? model.maxTokens
+        const replyBudget = admittedReplyTokens ?? options.maxTokens ?? model.maxTokens
         const maxTokens = retry ? replyBudget - usedOutput - 128 : replyBudget
         if (retry && maxTokens < 1) throw new LlmError('No reply budget remains for channel recovery', 'MALFORMED_RESPONSE')
         return snapshot.models.streamSimple(model, retry ? {
           ...context, systemPrompt: (context.systemPrompt ?? '') + FINAL_CHANNEL_INSTRUCTION,
         } : context, {
           ...profileOptions(profile, reasoning, apiKey),
-          ...(model.api === 'openai-completions' && /devstral/i.test(model.id) && { onPayload: mergeDevstralUsers }),
+          ...(model.api === 'openai-completions' && (/devstral/i.test(model.id) || admittedReplyTokens !== undefined) && {
+            onPayload: (payload: unknown) => {
+              const normalized = /devstral/i.test(model.id) ? mergeDevstralUsers(payload) : payload
+              return admittedReplyTokens === undefined ? normalized : lmStudioReplyBudget(normalized, maxTokens)
+            },
+          }),
           ...(model.api === 'openai-completions' && profile.lmStudioModels?.has(model.id) && {
             fetch: fetchLmStudioStream,
           }),

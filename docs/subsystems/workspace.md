@@ -2,6 +2,8 @@
 
 English | [中文](workspace.zh.md)
 
+`WorkspaceDeleteSessionRequest` names the `sessionId` of a confirmed conversation deletion. The [controller](../../packages/api/workspace-controller/src/commands.ts) returns a deletion receipt or an active-session error; the registry deletes dependent conversations before their parent and preserves project files.
+
 A workspace is the persistent record of a directory the user works in: a stable id over a canonical path, a display title, and the ordered account of sessions that belong to it. The subsystem is one package ([dsh-workspace](../../packages/workspace/workspace), `ctx.workspaceRegistry`) — an optional host-side capability, not part of the agent-loop spine, and invisible to models (no tools, no prompt text, no session events). It stores its records through the [storage domain form](storage.md) and validates session membership against [`SessionHeader.cwd`](persistence.md#sessionheader--metadata-beside-the-log), so `storageDomain` and `sessionPersistence` are mandatory startup dependencies: an unavailable persistence peer leaves the plugin pending rather than being mistaken for an empty history. Design record: [domain KV storage Agent Note](../../.agents/notes/proposed/architecture/2026-07-24-domain-kv-storage-and-workspace.md); bootstrap and GUI ordering: [Workspace UI product-flow Agent Note](../../.agents/notes/archived/feature/2026-07-25-workspace-ui-product-flow.md).
 
 Source: [`packages/workspace/workspace/src/types.ts`](../../packages/workspace/workspace/src/types.ts)
@@ -397,6 +399,13 @@ Host service backing the generated `ctx.remote.workspace` namespace.
 @Remote('insertSessionBefore') insertSessionBefore(request: WorkspaceInsertSessionBeforeRequest): Promise<WorkspaceValue>
 
 /**
+ * Permanently remove a Session after the caller confirms deletion.
+ * @param request - identity of the confirmed session.
+ * @returns the durable deletion acknowledgement.
+ */
+@Remote('deleteSession') deleteSession(request: WorkspaceDeleteSessionRequest): Promise<WorkspaceDeleteValue>
+
+/**
  * Hide one known Session from Workspace grouping surfaces.
  * @param request - Session identity to archive.
  * @returns the complete resulting archive set.
@@ -565,14 +574,16 @@ get(id: WorkspaceId): Workspace | undefined
 list(): Workspace[]
 
 /**
- * Delete one workspace registration while retaining its directory and every
- * session log. The durable order is updated before the table deletion; a
+ * Delete one workspace registration while retaining its directory. Session
+ * logs are retained unless deleteSessions is explicitly requested. The durable
+ * order is updated before the table deletion; a
  * failed table write restores the prior order and keeps the entity
  * published. Unknown ids are an idempotent no-op for domain callers.
  * @param id - Workspace registration to remove.
+ * @param options - whether to also delete the registered sessions and their histories.
  * @returns `true` when a record was deleted, `false` when it was unknown.
  */
-delete(id: WorkspaceId): Promise<boolean>
+delete(id: WorkspaceId, options: { deleteSessions?: boolean } = {}): Promise<boolean>
 
 /**
  * Move one workspace within the durable display order, DOM-insertBefore-like.
@@ -601,6 +612,12 @@ insertBefore(id: WorkspaceId, beforeId?: WorkspaceId): Promise<readonly Workspac
  * @returns resolution after durability, any stop requests, and follow-up admission.
  */
 archiveSession(sessionId: SessionId, options: ArchiveSessionOptions = {}): Promise<void>
+
+/**
+ * Delete a confirmed conversation tree, children first, preserving project files.
+ * @param sessionId - root of the confirmed conversation tree.
+ */
+deleteSession(sessionId: SessionId): Promise<void>
 
 /**
  * Unarchive one session durably by dropping it from the registry-global
@@ -689,6 +706,23 @@ Admit optional follow-up work after durable archival and any stop requests. Disp
  * @mode parallel
  */
 'workspace/session-archived'(request: SessionActivityRequest): Promise<void> | void
+```
+
+Source: [`packages/workspace/workspace/src/index.ts`](../../packages/workspace/workspace/src/index.ts)
+
+<a id="workspacesession-deleting--parallel"></a>
+
+#### `workspace/session-deleting` — parallel
+
+Release an idle live writer before permanently deleting its log.
+
+```ts cordis-catalog
+/**
+ * Release an idle live writer before permanently deleting its log.
+ * @mode parallel
+ * @param request - session whose writer must be released.
+ */
+'workspace/session-deleting'(request: SessionActivityRequest): Promise<void> | void
 ```
 
 Source: [`packages/workspace/workspace/src/index.ts`](../../packages/workspace/workspace/src/index.ts)

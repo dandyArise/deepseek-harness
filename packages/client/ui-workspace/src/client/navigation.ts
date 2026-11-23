@@ -95,7 +95,10 @@ export interface UiWorkspace {
    * @param options - `stopActivity` asks the Host to stop the Session's running work instead of refusing.
    */
   archiveSession(sessionId: SessionId, options?: { readonly stopActivity?: boolean }): Promise<void>
-  /** Release the displayed conversation after its deletion succeeds. */
+  /**
+   * Release the displayed conversation after its deletion succeeds.
+   * @param sessionId - confirmed conversation to delete.
+   */
   deleteSession(sessionId: SessionId): Promise<void>
   /**
    * Unarchive a Session, restoring it to its recorded Workspace position.

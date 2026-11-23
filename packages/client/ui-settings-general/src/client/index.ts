@@ -40,6 +40,8 @@ import { DesktopChannelRow, DesktopChannelToast } from './DesktopChannelRow.tsx'
 import { DesktopUpdateSource } from './desktop-update-source.ts'
 import { CloseLabel, HeaderContent, TriggerContent } from './chrome.tsx'
 import { GeneralSection } from './GeneralSection.tsx'
+import { GlobalInstructions, type GlobalInstructionsInjected } from './GlobalInstructions.tsx'
+import { instructionsEnglish, instructionsFrench, type InstructionsKey } from './global-instructions-locale.ts'
 import { CurrentVersionRow } from './CurrentVersionRow.tsx'
 import { DeveloperToolsRow, type DeveloperToolsRowInjected } from './DeveloperToolsRow.tsx'
 import { SettingsDocumentAction } from './SettingsDocumentAction.tsx'
@@ -61,6 +63,7 @@ export type { SettingsKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
+    globalInstructions: InstructionsKey
     /** Shell chrome + shell-owned General section copy. */
     settings: SettingsKey
   }
@@ -82,6 +85,29 @@ export const inject = ['slots', 'locale', 'connection', 'remote', 'remote.settin
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
+  ctx.effect(() => ctx.locale.register('globalInstructions', {
+    en: instructionsEnglish, fr: instructionsFrench, zh: instructionsEnglish,
+    ja: instructionsEnglish, es: instructionsEnglish, de: instructionsEnglish,
+    ru: instructionsEnglish, pt: instructionsEnglish,
+  }))
+  const instructionsText = ctx.locale.bind('globalInstructions')
+  const instructions: GlobalInstructionsInjected = {
+    readDocument: async () => {
+      const result = await ctx.remote.settings.readGlobalInstructions()
+      if (!result.ok) throw new Error(result.error.message)
+      return result.value
+    },
+    saveDocument: async (content, revision) => {
+      const result = await ctx.remote.settings.saveGlobalInstructions(content, revision)
+      if (!result.ok) throw new Error(result.error.message)
+      return result.value
+    },
+  }
+  ctx.slots.inject('settings.section', () => ctx.slots.register({
+    name: 'settings.section', id: 'global-instructions', order: 5,
+    label: () => instructionsText('title'), locale: 'globalInstructions',
+    inject: () => instructions,
+  }, GlobalInstructions))
   ctx.slots.inject('settings.general.item', () => ctx.slots.register({
     name: 'settings.general.item', id: 'developer-tools', order: 15, locale: NS,
     inject: (): DeveloperToolsRowInjected => ({

@@ -4,11 +4,14 @@ import { LlmError } from '@deepseek-ai/dsh-llm'
 const SELF = 'to=self<|message|>'
 const USER = 'to=user<|message|>'
 const THINK = '<think>'
+/** Retry instruction requesting only the latest user-facing answer after malformed channel output. */
 export const FINAL_CHANNEL_INSTRUCTION = '\nAnswer the latest user message directly. Produce only the final user-facing answer, without internal reasoning or channel headers.'
 
 /** Repair leading channel headers and think blocks before rendered Markdown.
  * Ordinary replies stream after their first non-header prefix. A malformed reply is
  * withheld and retried once; internal deliberation is never promoted to an answer.
+ * @param open - stream factory receiving the retry flag and already consumed output.
+ * @returns filtered events with usage accumulated across the bounded retry.
  */
 export async function* recoverSelfChannel(
   open: (retry: boolean, usedOutput: number) => AsyncIterable<AssistantMessageEvent>,

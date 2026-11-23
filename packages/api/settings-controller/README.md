@@ -31,6 +31,8 @@ Mount this package as a Loader entry in a profile that serves browser configurat
 
 `settings.openSettingsDocument()` prepares the provider-owned document and opens it with the native text editor; it accepts no browser-supplied filesystem target.
 
+`settings.readGlobalInstructions()` reads `$DSH_HOME/AGENTS.md` (empty draft if absent). `settings.saveGlobalInstructions(content, revision)` saves UTF-8 Markdown to that fixed path with a revision check and atomic replacement. Concurrent API saves serialize; stale drafts and documents over 1 MiB are rejected. These authenticated global actions do not restart the Host or force active sessions to reload instructions. External writers do not share the API queue; revision checks cannot eliminate a filesystem race between the final check and replacement.
+
 -----
 
 <a id="configuration"></a>

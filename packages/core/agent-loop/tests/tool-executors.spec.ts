@@ -1,6 +1,6 @@
 /** Scoped executor selection and lifetime through the real Agent loop. */
 import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
-import { expect, it, onTestFinished } from 'vitest'
+import { expect, it, onTestFinished, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -100,6 +100,39 @@ async function run(ctx: Context, agent: Agent): Promise<void> {
   agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
   await idle
 }
+
+it('discovers a tool within a loaded 8192-token context and keeps scoped restrictions', async () => {
+  const adapter = new MockAdapter([
+    toolCallResponse('discover', 'harness_discover_tools', { query: 'echo' }),
+    toolCallResponse('execute', 'echo', {}), textResponse('done'),
+    toolCallResponse('denied', 'echo', {}), textResponse('denied correctly'),
+  ])
+  vi.spyOn(adapter, 'resolveModel').mockResolvedValue({ provider: 'mock', id: 'mock', name: 'mock', context: { contextWindow: 8192 } })
+  const ctx = await setup(adapter)
+  for (let i = 0; i < 42; i++) ctx.tools.register(defineTool({
+    name: `large_${i}`, description: 'Large tool. '.repeat(100),
+    parameters: Object.fromEntries(Array.from({ length: 30 }, (_, n) =>
+      [`field_${n}`, { type: 'string', description: 'Argument documentation. '.repeat(20) }])),
+    output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+    execute: async () => 'unused',
+  }))
+  const agent = await ctx.agentLoop.create(brandString<SessionId>('adaptive-native'), { provider: 'mock', model: 'mock' })
+  await run(ctx, agent)
+  expect(adapter.requests[0]?.tools?.map(tool => tool.name)).toEqual(['harness_discover_tools'])
+  expect(adapter.requests[1]?.tools?.map(tool => tool.name).sort()).toEqual(['echo', 'harness_discover_tools'])
+  expect(agent.session.snapshotEvents().filter(event => event.type === 'tool/result').at(-1)).toMatchObject({
+    data: { message: { content: [{ type: 'text', text: 'shared' }], isError: false } },
+  })
+  for (const request of adapter.requests) expect(JSON.stringify(request.tools).length / 4).toBeLessThan(2048)
+  const other = await ctx.agentLoop.create(brandString<SessionId>('adaptive-other'), { provider: 'mock', model: 'mock' })
+  other.ctx.tools.restrict({ deny: ['echo'] })
+  expect(other.ctx.tools.get('echo', other)).toBeUndefined()
+  await run(ctx, other)
+  expect(adapter.requests[3]?.tools?.map(tool => tool.name)).toEqual(['harness_discover_tools'])
+  expect(other.session.snapshotEvents().find(event => event.type === 'tool/result')).toMatchObject({
+    data: { message: { isError: true } },
+  })
+})
 
 it('shares the registry and selects an independent executor through the preset scope chain', async () => {
   const trace: string[] = []

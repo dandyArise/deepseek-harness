@@ -548,6 +548,8 @@
 .agentSidebar button progress { accent-color: var(--dsw-alias-text-link, LinkText); }
 .agentControls { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 0 10px 8px; }
 .agentControls details, .agentControls small { width: 100%; }
+.agentNameForm { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; width: 100%; }
+.agentNameForm input { flex: 1; min-width: 120px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 5px; padding: 5px 8px; color: inherit; background: transparent; }
 .agentControls summary { cursor: pointer; font-size: 12px; }
 .agentControls p { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 12em; overflow: auto; }
 .agentControls button { display: inline-flex; width: auto; min-height: 28px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 5px; padding: 2px 8px; }

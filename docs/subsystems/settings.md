@@ -2,6 +2,8 @@
 
 English | [中文](settings.zh.md)
 
+`GlobalInstructionsDocument` carries the fixed process-home `AGENTS.md` path, Markdown `content` and a `revision` used to reject stale saves. The [settings controller](../../packages/api/settings-controller/src/global-instructions.ts) serializes atomic writes; saving does not restart Harness or change the selected model.
+
 The [settings service](../../packages/settings/settings/README.md) projects volatile Config fields from active profile entries. The [configuration editor](../../packages/boot/config-editor/README.md) persists edits through Cordis patches. Business consumers read `.get()` on their own Config references.
 
 ## Identity and values
@@ -126,6 +128,18 @@ Host service backing the generated `ctx.remote.settings` namespace. Every remote
  * @throws RemoteError when no document exists, preparation fails, or opening fails.
  */
 @Remote async openSettingsDocument(signal: AbortSignal): Promise<SettingsDocumentOpenValue>
+
+/** Read the process-home AGENTS.md; callers cannot choose a filesystem path.
+ * @returns Markdown, resolved path and revision used for a guarded save.
+ */
+@Remote readGlobalInstructions(): Promise<GlobalInstructionsDocument>
+
+/** Save global Markdown without overwriting a newer editor revision.
+ * @param content - complete Markdown text.
+ * @param revision - revision returned by the last read.
+ * @returns the committed document.
+ */
+@Remote saveGlobalInstructions(content: string, revision: string): Promise<GlobalInstructionsDocument>
 ```
 
 Source: [`packages/api/settings-controller/src/index.ts`](../../packages/api/settings-controller/src/index.ts)

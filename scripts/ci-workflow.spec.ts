@@ -583,6 +583,8 @@ describe('CI workflow', () => {
       expect(job['runs-on']).toContain('vm-backup')
       expect(evaluateRunsOn(job['runs-on'], { vars: { DSH_CI_FAILOVER_LINUX: 'blacksmith' } }))
         .toBe(`blacksmith-${jobName === 'node-24' ? 8 : 16}vcpu-ubuntu-2404`)
+      expect(evaluateRunsOn(job['runs-on'], { vars: { DSH_CI_FAILOVER_LINUX: 'github' } }))
+        .toBe('ubuntu-latest')
     }
     expect(aggregate['runs-on']).toContain('DSH_CI_FAILOVER_LINUX')
     expect(aggregate['runs-on']).not.toContain('DSH_CI_FAILOVER_WINDOWS')
@@ -597,6 +599,8 @@ describe('CI workflow', () => {
       linuxAggregate: aggregate['runs-on'] as string,
       windows: windowsBuild['runs-on'] as string,
     }
+    expect(evaluateRunsOn(selectors.windows, { vars: { DSH_CI_FAILOVER_WINDOWS: 'github' } }))
+      .toBe('windows-latest')
     const evaluate = (expression: string, vars: Record<string, string>, login = 'maintainer'): unknown => {
       return evaluateRunsOn(expression, {
         vars,
