@@ -128,6 +128,18 @@ describe('V4 framing and restoration', () => {
     expect(restoreReleasedV4Artifact(artifact, new Set([required.type]))).toBe(artifact)
   })
 
+  it.each([{ add: ['child'] }, { restore: 'child' }, { auto: true }, { rename: 'child', name: 'Reviewer' }])(
+    'preserves popup archive data or refuses an unavailable event vocabulary: %j', (data) => {
+      const row: SessionFormatEvent = { type: 'subagent/popup-archive', seq: 0, time: 1, data }
+      const artifact = { header, events: [row], inheritedEventCount: 0 }
+      const original = JSON.stringify(artifact)
+      expect(() => restoreReleasedV4Artifact(artifact, types)).toThrow('unknown event type')
+      expect(JSON.stringify(artifact)).toBe(original)
+      expect(restoreReleasedV4Artifact(artifact, new Set([...types, row.type]))).toBe(artifact)
+      expect(JSON.stringify(artifact)).toBe(original)
+    },
+  )
+
   it('refuses wrapper-shaped and malformed native tool results before recovery', () => {
     const wrapper = { type: 'tool/result', seq: 0, time: 1, data: { message: { id: 'result', role: 'user', source: { kind: 'tool', callId: 'call' }, content: [] } } }
     const malformed = { type: 'tool/result', seq: 0, time: 1, data: { message: { id: 'result', role: 'tool', source: { kind: 'tool', callId: 'call' }, toolCallId: 'call', content: [], isError: 'yes' } } }

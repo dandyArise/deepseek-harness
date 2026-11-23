@@ -6,47 +6,13 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import TurndownService from 'turndown'
-import { gfm } from '@joplin/turndown-plugin-gfm'
+import { createRequire } from 'node:module'
+import type TurndownService from 'turndown'
 import { defineTool, ToolArgsError } from '@deepseek-ai/dsh-tools'
 import type { GenericCallView, ToolResult, WebFetchResultView } from '@deepseek-ai/dsh-tools'
 import type { WebFetchBody, WebFetchResult } from '@deepseek-ai/dsh-web'
 import { assertNever, type JsonValue } from '@deepseek-ai/dsh-util-values'
 import { EXTERNAL_WEB_CONTENT_NOTICE } from './trust.ts'
-
-/**
- * The shared HTML→markdown converter: turndown over its bundled domino DOM,
- * with GitHub-flavored tables/strikethrough (`@joplin/turndown-plugin-gfm`).
- * The style options are fixed model-facing presentation (matching the repo's
- * markdown conventions), not deployment tunables. `remove` drops non-content
- * elements wholesale — turndown's default keeps their text. The instance is
- * stateless across `turndown()` calls and safe to share.
- */
-const turndown = new TurndownService({
-  headingStyle: 'atx',
-  codeBlockStyle: 'fenced',
-  bulletListMarker: '-',
-})
-turndown.use(gfm)
-turndown.addRule('removeNonVisibleContent', {
-  filter(node) {
-    if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'IFRAME', 'OBJECT', 'EMBED'].includes(node.nodeName)) return true
-    if (node.hasAttribute('hidden') || node.getAttribute('aria-hidden')?.toLowerCase() === 'true') return true
-    if (node.nodeName === 'INPUT' && node.getAttribute('type')?.toLowerCase() === 'hidden') return true
-    const declarations = node.getAttribute('style')?.split(';') ?? []
-    return declarations.some((declaration) => {
-      const separator = declaration.indexOf(':')
-      if (separator === -1) return false
-      const property = declaration.slice(0, separator).trim().toLowerCase()
-      const value = declaration.slice(separator + 1).trim().toLowerCase().replace(/\s*!important\s*$/u, '')
-      return (property === 'display' && value === 'none')
-        || (property === 'visibility' && (value === 'hidden' || value === 'collapse'))
-    })
-  },
-  replacement() {
-    return ''
-  },
-})
 
 /** Render one GFM table cell without interpreting HTML span counts. */
 function renderTableCell(content: string, index: number): string {
@@ -73,26 +39,69 @@ function tableBorder(cell: HTMLTableCellElement): string {
   return '---'
 }
 
-turndown.addRule('tableCellWithoutSpanExpansion', {
-  filter: ['th', 'td'],
-  replacement(content, node) {
-    const cell = node as HTMLTableCellElement
-    const row = cell.parentNode as HTMLTableRowElement
-    // GFM cannot represent spanning cells. Ignoring colspan keeps conversion
-    // work and output proportional to the source instead of the numeric attribute.
-    return renderTableCell(content, Array.prototype.indexOf.call(row.childNodes, cell))
-  },
-})
-turndown.addRule('tableRowWithoutSpanExpansion', {
-  filter: 'tr',
-  replacement(content, node) {
-    const row = node as HTMLTableRowElement
-    const border = isTableHeadingRow(row)
-      ? Array.from(row.cells, (cell, index) => renderTableCell(tableBorder(cell), index)).join('')
-      : ''
-    return `\n${content}${border.length > 0 ? `\n${border}` : ''}`
-  },
-})
+const requireConverter = createRequire(import.meta.url)
+let converter: TurndownService | undefined
+
+/**
+ * The shared HTML→markdown converter: turndown over its bundled domino DOM,
+ * with GitHub-flavored tables/strikethrough (`@joplin/turndown-plugin-gfm`).
+ * The style options are fixed model-facing presentation (matching the repo's
+ * markdown conventions), not deployment tunables. `remove` drops non-content
+ * elements wholesale — turndown's default keeps their text. The instance is
+ * stateless across `turndown()` calls and safe to share.
+ */
+function htmlConverter(): TurndownService {
+  if (converter) return converter
+  const Turndown = requireConverter('turndown') as typeof import('turndown')
+  const { gfm } = requireConverter('@joplin/turndown-plugin-gfm') as typeof import('@joplin/turndown-plugin-gfm')
+  const turndown = new Turndown({
+    headingStyle: 'atx',
+    codeBlockStyle: 'fenced',
+    bulletListMarker: '-',
+  })
+  turndown.use(gfm)
+  turndown.addRule('removeNonVisibleContent', {
+    filter(node) {
+      if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'IFRAME', 'OBJECT', 'EMBED'].includes(node.nodeName)) return true
+      if (node.hasAttribute('hidden') || node.getAttribute('aria-hidden')?.toLowerCase() === 'true') return true
+      if (node.nodeName === 'INPUT' && node.getAttribute('type')?.toLowerCase() === 'hidden') return true
+      const declarations = node.getAttribute('style')?.split(';') ?? []
+      return declarations.some((declaration) => {
+        const separator = declaration.indexOf(':')
+        if (separator === -1) return false
+        const property = declaration.slice(0, separator).trim().toLowerCase()
+        const value = declaration.slice(separator + 1).trim().toLowerCase().replace(/\s*!important\s*$/u, '')
+        return (property === 'display' && value === 'none')
+          || (property === 'visibility' && (value === 'hidden' || value === 'collapse'))
+      })
+    },
+    replacement() {
+      return ''
+    },
+  })
+  turndown.addRule('tableCellWithoutSpanExpansion', {
+    filter: ['th', 'td'],
+    replacement(content, node) {
+      const cell = node as HTMLTableCellElement
+      const row = cell.parentNode as HTMLTableRowElement
+      // GFM cannot represent spanning cells. Ignoring colspan keeps conversion
+      // work and output proportional to the source instead of the numeric attribute.
+      return renderTableCell(content, Array.prototype.indexOf.call(row.childNodes, cell))
+    },
+  })
+  turndown.addRule('tableRowWithoutSpanExpansion', {
+    filter: 'tr',
+    replacement(content, node) {
+      const row = node as HTMLTableRowElement
+      const border = isTableHeadingRow(row)
+        ? Array.from(row.cells, (cell, index) => renderTableCell(tableBorder(cell), index)).join('')
+        : ''
+      return `\n${content}${border.length > 0 ? `\n${border}` : ''}`
+    },
+  })
+  converter = turndown
+  return converter
+}
 
 /**
  * Validate value constraints the schema DSL can't express: a non-blank `url`.
@@ -243,16 +252,18 @@ function renderBody(body: WebFetchBody, maxInputChars: number): RenderedBody {
   const content = body.content.slice(0, maxInputChars)
   const sourceTruncated = content.length !== body.content.length
   switch (body.kind) {
-    case 'html':
+    case 'html': {
       if (exceedsConversionDepth(content)) return { text: '[HTML content omitted: unable to convert safely.]', sourceTruncated }
+      const renderer = htmlConverter()
       try {
-        return { text: turndown.turndown(content), sourceTruncated }
+        return { text: renderer.turndown(content), sourceTruncated }
       } catch {
         // turndown's DOM walk recurses per element; malformed markup the lexical
         // guard cannot model can still throw RangeError. Provider errors remain
         // structured upstream; conversion failure returns no source markup.
         return { text: '[HTML content omitted: unable to convert safely.]', sourceTruncated }
       }
+    }
     case 'text':
       return { text: content, sourceTruncated }
     /* v8 ignore next 2 -- WebFetchBody is a closed union; this arm is unreachable and only makes adding a kind a compile error. */

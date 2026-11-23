@@ -1,0 +1,29 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`corrects an unsupported success claim through the production Loader profile 1`] = `
+{
+  "output": "Work is incomplete: the required test has no configured command.",
+  "reports": [
+    "Verification evidence (authoritative):
+[
+  {
+    "id": "test",
+    "required": true,
+    "command": null,
+    "status": "not-run"
+  }
+]
+Correct unsupported success claims. Give an honest final answer; incomplete work is allowed.",
+    "Verification evidence (authoritative):
+[
+  {
+    "id": "test",
+    "required": true,
+    "command": null,
+    "status": "not-run"
+  }
+]
+No further validation correction is requested. Missing, failed and stale checks remain unverified.",
+  ],
+}
+`;

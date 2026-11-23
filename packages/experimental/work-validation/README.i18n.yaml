@@ -1,0 +1,46 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/experimental/work-validation/README.md
+/:
+  en: 67dd414cbe45b9a8
+  zh: accdd67fedf97a82
+/deepseek-ai-dsh-work-validation:
+  en: 1d094c40dcb76e3e
+  zh: 2f93661ace9d89ef
+/deepseek-ai-dsh-work-validation/summary:
+  en: 16a5d13db645fc89
+  zh: 49c24513b97eb7bb
+/deepseek-ai-dsh-work-validation/table-of-contents:
+  en: 1fe606b38a79eccf
+  zh: 66aa1fd46c64edfa
+/deepseek-ai-dsh-work-validation/configuration:
+  en: 33d63151a8bcf9ea
+  zh: 0523880161f3026d
+/deepseek-ai-dsh-work-validation/evidence-and-final-answers:
+  en: eefc2d6400dae516
+  zh: cf76d3afd7e1420c
+/deepseek-ai-dsh-work-validation/reproduce-checks:
+  en: 00827d958d2ca6f1
+  zh: 5064d29473015b01
+/deepseek-ai-dsh-work-validation/model-experience:
+  en: 215e7ba838619b7b
+  zh: 215e7ba838619b7b
+/deepseek-ai-dsh-work-validation/model-experience/project-checks-and-computed-report:
+  en: 426b22debee6e131
+  zh: 63dff7cef3a790be
+/deepseek-ai-dsh-work-validation/model-experience/project-checks-and-computed-report/what-the-model-sees:
+  en: 0b88a7ecc6f0ac4e
+  zh: 42878e5b59c5f902
+/deepseek-ai-dsh-work-validation/model-experience/project-checks-and-computed-report/token-effect:
+  en: 3b868c89dcc2ad23
+  zh: c473386bef558c4e
+/deepseek-ai-dsh-work-validation/model-experience/project-checks-and-computed-report/kv-cache-effect:
+  en: 040d96258da2cfda
+  zh: d0ca1323fb795625
+/deepseek-ai-dsh-work-validation/known-limitations-and-deferred-work:
+  en: c5595a8d6c612ec3
+  zh: 5612b64514c036c9
+/deepseek-ai-dsh-work-validation/known-limitations-and-deferred-work/dev-note:
+  en: 0a1253c6f7b5e8b9
+  zh: 9f56528562c7c914

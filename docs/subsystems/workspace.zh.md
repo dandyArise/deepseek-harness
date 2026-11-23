@@ -2,6 +2,8 @@
 
 [English](workspace.md) | 中文
 
+`WorkspaceDeleteSessionRequest` 用 `sessionId` 标识已确认删除的会话。[控制器](../../packages/api/workspace-controller/src/commands.ts)返回删除确认或活动会话错误；注册表先删除依赖子会话，再删除父会话，并保留项目文件。
+
 工作区（workspace）是用户工作目录的持久记录：一个建立在规范路径之上的稳定 id、一个显示标题，以及归属于它的会话的有序账本。该子系统是单个包（package）（[dsh-workspace](../../packages/workspace/workspace)，`ctx.workspaceRegistry`）——一项宿主侧可选能力，不属于 agent loop（智能体循环）主干，并且对模型不可见（没有工具、没有提示词文本、没有会话事件）。它通过[存储领域数据形式](storage.zh.md)存储自己的记录，并对照 [`SessionHeader.cwd`](persistence.zh.md#sessionheader--metadata-beside-the-log) 校验会话成员资格，因此 `storageDomain` 与 `sessionPersistence` 是必需的启动依赖：持久化这一依赖不可用时，插件保持 pending，而不是把这种不可用误当作空历史。设计记录：[领域 KV 存储 Agent Note（agent 决策记录）](../../.agents/notes/proposed/architecture/2026-07-24-domain-kv-storage-and-workspace.zh.md)；引导与 GUI 顺序：[Workspace UI 产品流程 Agent Note](../../.agents/notes/archived/feature/2026-07-25-workspace-ui-product-flow.md)。
 
 源码：[`packages/workspace/workspace/src/types.ts`](../../packages/workspace/workspace/src/types.ts)
@@ -397,6 +399,13 @@ Host service backing the generated `ctx.remote.workspace` namespace.
 @Remote('insertSessionBefore') insertSessionBefore(request: WorkspaceInsertSessionBeforeRequest): Promise<WorkspaceValue>
 
 /**
+ * Permanently remove a Session after the caller confirms deletion.
+ * @param request - identity of the confirmed session.
+ * @returns the durable deletion acknowledgement.
+ */
+@Remote('deleteSession') deleteSession(request: WorkspaceDeleteSessionRequest): Promise<WorkspaceDeleteValue>
+
+/**
  * Hide one known Session from Workspace grouping surfaces.
  * @param request - Session identity to archive.
  * @returns the complete resulting archive set.
@@ -565,14 +574,16 @@ get(id: WorkspaceId): Workspace | undefined
 list(): Workspace[]
 
 /**
- * Delete one workspace registration while retaining its directory and every
- * session log. The durable order is updated before the table deletion; a
+ * Delete one workspace registration while retaining its directory. Session
+ * logs are retained unless deleteSessions is explicitly requested. The durable
+ * order is updated before the table deletion; a
  * failed table write restores the prior order and keeps the entity
  * published. Unknown ids are an idempotent no-op for domain callers.
  * @param id - Workspace registration to remove.
+ * @param options - whether to also delete the registered sessions and their histories.
  * @returns `true` when a record was deleted, `false` when it was unknown.
  */
-delete(id: WorkspaceId): Promise<boolean>
+delete(id: WorkspaceId, options: { deleteSessions?: boolean } = {}): Promise<boolean>
 
 /**
  * Move one workspace within the durable display order, DOM-insertBefore-like.
@@ -601,6 +612,12 @@ insertBefore(id: WorkspaceId, beforeId?: WorkspaceId): Promise<readonly Workspac
  * @returns resolution after durability, any stop requests, and follow-up admission.
  */
 archiveSession(sessionId: SessionId, options: ArchiveSessionOptions = {}): Promise<void>
+
+/**
+ * Delete a confirmed conversation tree, children first, preserving project files.
+ * @param sessionId - root of the confirmed conversation tree.
+ */
+deleteSession(sessionId: SessionId): Promise<void>
 
 /**
  * Unarchive one session durably by dropping it from the registry-global
@@ -689,6 +706,23 @@ Admit optional follow-up work after durable archival and any stop requests. Disp
  * @mode parallel
  */
 'workspace/session-archived'(request: SessionActivityRequest): Promise<void> | void
+```
+
+Source: [`packages/workspace/workspace/src/index.ts`](../../packages/workspace/workspace/src/index.ts)
+
+<a id="workspacesession-deleting--parallel"></a>
+
+#### `workspace/session-deleting` — parallel
+
+Release an idle live writer before permanently deleting its log.
+
+```ts cordis-catalog
+/**
+ * Release an idle live writer before permanently deleting its log.
+ * @mode parallel
+ * @param request - session whose writer must be released.
+ */
+'workspace/session-deleting'(request: SessionActivityRequest): Promise<void> | void
 ```
 
 Source: [`packages/workspace/workspace/src/index.ts`](../../packages/workspace/workspace/src/index.ts)

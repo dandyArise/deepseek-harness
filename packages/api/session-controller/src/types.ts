@@ -690,6 +690,7 @@ declare module '@deepseek-ai/cordis' {
      * A Session left the live Host registry or was permanently deleted.
      * @mode emit
      * @param sessionId - removed Session identity.
+     * @param permanent - whether the durable log was deleted rather than unloaded.
      */
     'api-session/removed'(sessionId: SessionId, permanent?: boolean): void
     /**
@@ -722,9 +723,11 @@ export type SessionProjectionValue = JsonValue
 /** Application metadata returned by the serving desktop for one file. */
 export type SessionWorkspacePathApplication = NativeFileApplication
 
+/** Parent session and mutation of its direct-child archive. */
 export interface SessionSubagentArchiveRequest {
   readonly sessionId: SessionId
   readonly update: SubagentArchiveUpdate
 }
 
+/** Archive snapshot returned after applying a parent-owned update. */
 export type SessionSubagentArchiveValue = SubagentArchiveState

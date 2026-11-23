@@ -20,7 +20,7 @@ import css from './SubagentHeaderLineage.module.css'
 
 function subscribeSidebar(listener: () => void) {
   document.addEventListener('session-agents-sidebar-change', listener)
-  return () => document.removeEventListener('session-agents-sidebar-change', listener)
+  return () => { document.removeEventListener('session-agents-sidebar-change', listener) }
 }
 
 type SubagentCatalogSnapshot = Omit<SessionProjectionSnapshot, 'values' | 'state'> & {
@@ -31,6 +31,7 @@ type Catalogs = Readonly<Record<SessionId, SubagentCatalogSnapshot>>
 
 /** Business actions supplied by the slot registration. */
 export type SubagentCatalogInjected = {
+  renameAgent?: (address: SubagentAddress, title: string) => Promise<void>
   updateArchive?: (update: SubagentArchiveUpdate) => Promise<void>
   openAgents?: () => void
   agentAction?: (address: SubagentAddress, action: 'stop' | 'result' | 'instruction' | 'retry') => Promise<string>
@@ -565,11 +566,46 @@ function AgentControls({ address, status, perform }: {
   </div>
 }
 
+/** Edit the parent's durable display label without changing the agent's routing identity. */
+function AgentName({ address, title, rename, t }: {
+  address: SubagentAddress
+  title: string
+  rename: NonNullable<SubagentCatalogInjected['renameAgent']>
+  t: TranslateNS<typeof NS>
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(title)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const pending = useRef(false)
+  const inputId = useId()
+  async function save() {
+    if (pending.current || !draft.trim()) return
+    pending.current = true
+    setBusy(true)
+    setError('')
+    try { await rename(address, draft.trim()); setEditing(false) }
+    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
+    finally { pending.current = false; setBusy(false) }
+  }
+  return <div className={css.agentControls}>
+    {editing ? <form className={css.agentNameForm} onSubmit={(event) => { event.preventDefault(); void save() }}>
+      <label htmlFor={inputId}>{t('rename.label')}</label>
+      <input id={inputId} autoFocus maxLength={200} value={draft} disabled={busy}
+        onChange={(event) => { setDraft(event.currentTarget.value) }} />
+      <button type="submit" disabled={busy || !draft.trim()}>{t('rename.save')}</button>
+      <button type="button" disabled={busy} onClick={() => { setEditing(false) }}>{t('rename.cancel')}</button>
+      {error && <small role="alert">{error}</small>}
+    </form> : <button type="button" onClick={() => { setDraft(title); setError(''); setEditing(true) }}>{t('rename.action')}</button>}
+  </div>
+}
+
 function AgentSidebar({
-  entries, summaries, catalogs, refreshProjection, progress, parentId, openChildAside, agentAction, archive, updateArchive, t,
+  entries, summaries, catalogs, refreshProjection, progress, parentId, openChildAside, agentAction, archive, updateArchive, renameAgent, t,
 }: {
   archive: SessionProjectionMap['subagentArchive'] | undefined
   updateArchive: SubagentCatalogInjected['updateArchive']
+  renameAgent: SubagentCatalogInjected['renameAgent']
   agentAction: SubagentCatalogInjected['agentAction']
   entries: SubagentCatalogSnapshot['entries']
   summaries: CatalogRowsProps['summaries']
@@ -594,8 +630,8 @@ function AgentSidebar({
   const running = entries.some(entry => entry.mode !== 'external' && entry.activity === 'running')
   useEffect(() => {
     if (!running) return
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
+    const timer = setInterval(() => { setNow(Date.now()) }, 1000)
+    return () => { clearInterval(timer) }
   }, [running])
   const rows = entries.map((entry) => {
     const summary = summaries[entry.id]
@@ -613,7 +649,8 @@ function AgentSidebar({
   const visible = rows.filter(({ entry, status }) => status !== 'completed' || !archivedIds.has(entry.id))
   const renderRow = ({ entry, status, tokens, duration }: typeof rows[number], isArchived: boolean) => {
     const name = entryName(entry)
-    const title = entry.label && entry.label !== name ? `${name} · ${entry.label}` : name
+    const label = archive?.names?.[entry.id] || entry.label
+    const title = label && label !== name ? `${name} · ${label}` : name
     const readError = entry.mode !== 'external' && catalogs[entry.id]?.state === 'error'
     const mode = entry.mode === 'one-shot' ? t('mode.oneShot') : entry.mode === 'continuable' ? t('mode.continuable') : t(entry.mode === 'external' ? 'mode.external' : 'mode.unknown')
     const share = tokens !== undefined && total > 0 ? percent.format(tokens / total) : undefined
@@ -632,9 +669,12 @@ function AgentSidebar({
         ? <div className={css.agentControls}><button disabled={saving} onClick={() => void saveArchive({ action: 'restore', childId: entry.id })}>{t('archive.restore')}</button></div>
         : agentAction && entry.mode !== 'external' && <AgentControls address={{ parentSessionId: parentId, childSessionId: entry.id, mode: entry.mode }}
           status={status} perform={agentAction} />}
+      {renameAgent && entry.mode !== 'external' && <AgentName
+        address={{ parentSessionId: parentId, childSessionId: entry.id, mode: entry.mode }}
+        title={label || name} rename={renameAgent} t={t} />}
       {readError && <details className={css.sidebarError}><summary>{t('load.error')}</summary>
         <p>{catalogs[entry.id]?.error?.message}</p>
-        <button type="button" onClick={() => refreshProjection(entry.id)}>{t('retry')}</button>
+        <button type="button" onClick={() => { refreshProjection(entry.id) }}>{t('retry')}</button>
       </details>}</div>
   }
   return <section className={css.agentSidebar} aria-label={t('section.title')}>
@@ -872,11 +912,11 @@ function CatalogDropdown(props: CatalogDropdownProps) {
       onKeyDown={navigate}
       onPointerLeave={scheduleHoverClose}
     >
-      {sidebar && variant === 'count' && currentSessionId === undefined && directCount > 0 && createPortal(
+      {sidebar && variant === 'count' && directCount > 0 && createPortal(
         <AgentSidebar key={rootSessionId} agentAction={props.agentAction} entries={directChildren} summaries={summaries}
           catalogs={catalogs} refreshProjection={props.refreshProjection} progress={progress}
           archive={projections[rootSessionId]?.values.subagentArchive} updateArchive={props.updateArchive}
-          parentId={rootSessionId} openChildAside={openChildAside} t={t} />, sidebar)}
+          parentId={rootSessionId} openChildAside={openChildAside} renameAgent={props.renameAgent} t={t} />, sidebar)}
       <Tooltip
         label={t(totalCountKey, { count: directCount })}
         disabled={open || variant === 'switcher'}
@@ -961,7 +1001,7 @@ function CatalogDropdown(props: CatalogDropdownProps) {
               <AgentSidebar key={rootSessionId} entries={directChildren} summaries={summaries} catalogs={catalogs}
                 refreshProjection={props.refreshProjection} progress={progress} parentId={rootSessionId}
                 archive={projections[rootSessionId]?.values.subagentArchive} updateArchive={props.updateArchive}
-                agentAction={props.agentAction} t={t}
+                agentAction={props.agentAction} renameAgent={props.renameAgent} t={t}
                 openChildAside={(address) => { openChildAside(address); changeOpen(false) }} />
             ) : <>
               {hasSharedTasks && (
@@ -1023,7 +1063,7 @@ export function SubagentCatalogAction(props: SubagentCatalogActionProps) {
 /** Bind task-board visibility only in root conversations. */
 function RootCatalogAction({
   sessionId, useProjection, useSessions, useSessionStatus, useFooterAvailable,
-  openChild, openChildAside, refreshProjection, prepareCatalog, agentAction, updateArchive, openAgents, t, renderSlot,
+  openChild, openChildAside, refreshProjection, prepareCatalog, agentAction, updateArchive, renameAgent, openAgents, t, renderSlot,
 }: SubagentCatalogActionProps) {
   const hasSharedTasks = useProjection('agentTeam', team => team?.enabled === true
     && team.tasks.some(task => task.status !== 'deleted'))
@@ -1034,6 +1074,7 @@ function RootCatalogAction({
       key={sessionId}
       {...agentAction ? { agentAction } : {}}
       {...updateArchive ? { updateArchive } : {}}
+      {...renameAgent ? { renameAgent } : {}}
       {...openAgents ? { openAgents } : {}}
       rootSessionId={sessionId}
       variant="count"

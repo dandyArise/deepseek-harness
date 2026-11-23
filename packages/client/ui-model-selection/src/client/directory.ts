@@ -76,7 +76,7 @@ export class ModelDirectory {
    * @param refresh - re-read the persisted catalog after a verification operation.
    * @returns the fresh directory value.
    */
-  async load(refresh = false): Promise<ModelDirectoryState> {
+  async load(refresh: boolean = false): Promise<ModelDirectoryState> {
     this.assertAvailable()
     if (refresh) this.catalog.refresh()
     await this.catalog.load()

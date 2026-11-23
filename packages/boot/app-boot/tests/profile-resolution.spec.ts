@@ -176,6 +176,19 @@ async function resolutionOf(f: ReturnType<typeof fixture>): Promise<RuntimeResol
   })
 }
 
+it('refreshes missing installation dependencies on the next inventory', async () => {
+  const f = fixture()
+  pkg(f.installed, '@deepseek-ai/dsh-core', 1, { 'late-dependency': '*' })
+  const before = await resolutionOf(f)
+  expect(before.entries.some(entry => entry.name === 'late-dependency')).toBe(false)
+  const dependency = join(dirname(f.installAnchor), 'node_modules', 'late-dependency')
+  pkg(dependency, 'late-dependency', 2)
+  const after = await resolutionOf(f)
+  expect(after.entries.find(entry => entry.name === 'late-dependency')?.version).toBe('2.0.0')
+  unlinkSync(join(dependency, 'package.json'))
+  expect((await resolutionOf(f)).entries.some(entry => entry.name === 'late-dependency')).toBe(false)
+})
+
 /**
  * Ancestor node_modules layers of a profile importer, innermost first:
  * private (plugin-private), profile (profile node_modules), shared

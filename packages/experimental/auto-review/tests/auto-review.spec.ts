@@ -421,11 +421,27 @@ describe('native review request', () => {
     })
     expect(request.maxTokens).toBeUndefined()
     expect(request.tools).toBeUndefined()
+    let compactCharacters = 0
+    let indentedCharacters = 0
     for (const message of request.messages) {
       expect(message).not.toHaveProperty('source')
       expect(message).not.toHaveProperty('id')
       expect(Object.isFrozen(message.content[0])).toBe(true)
+      for (const block of message.content) {
+        if (block.type !== 'text') continue
+        const body = block.text.replace(/^ENVIRONMENT\n/, '')
+        // Preserve nested facts, roles and strings exactly without JSON indentation.
+        expect(body).toBe(JSON.stringify(JSON.parse(body)))
+        compactCharacters += body.length
+        indentedCharacters += JSON.stringify(JSON.parse(body), null, 2).length
+      }
     }
+    expect({ compactCharacters, indentedCharacters }).toMatchInlineSnapshot(`
+      {
+        "compactCharacters": 2036,
+        "indentedCharacters": 2767,
+      }
+    `)
     expect(Object.isFrozen(request)).toBe(true)
 
     const sections = requestSections(request)

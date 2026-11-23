@@ -2,6 +2,8 @@
 
 [English](settings.md) | 中文
 
+`GlobalInstructionsDocument` 包含进程主目录下固定的 `AGENTS.md` 路径、Markdown `content` 及用于拒绝过期保存的 `revision`。[设置控制器](../../packages/api/settings-controller/src/global-instructions.ts)串行执行原子写入；保存不会重启 Harness 或更改所选模型。
+
 [设置服务](../../packages/settings/settings/README.zh.md) 从活动 profile 条目投影 volatile Config 字段。[配置编辑器](../../packages/boot/config-editor/README.zh.md) 通过 Cordis patch 持久化编辑。业务消费者对自己的 Config 引用调用 `.get()`。
 
 ## 标识与值
@@ -126,6 +128,18 @@ Host service backing the generated `ctx.remote.settings` namespace. Every remote
  * @throws RemoteError when no document exists, preparation fails, or opening fails.
  */
 @Remote async openSettingsDocument(signal: AbortSignal): Promise<SettingsDocumentOpenValue>
+
+/** Read the process-home AGENTS.md; callers cannot choose a filesystem path.
+ * @returns Markdown, resolved path and revision used for a guarded save.
+ */
+@Remote readGlobalInstructions(): Promise<GlobalInstructionsDocument>
+
+/** Save global Markdown without overwriting a newer editor revision.
+ * @param content - complete Markdown text.
+ * @param revision - revision returned by the last read.
+ * @returns the committed document.
+ */
+@Remote saveGlobalInstructions(content: string, revision: string): Promise<GlobalInstructionsDocument>
 ```
 
 Source: [`packages/api/settings-controller/src/index.ts`](../../packages/api/settings-controller/src/index.ts)

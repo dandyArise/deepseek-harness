@@ -19,6 +19,8 @@ import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typer
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { z } from 'zod'
 import { CredentialsController } from './credentials.ts'
+import { GlobalInstructionsFile } from './global-instructions.ts'
+import type { GlobalInstructionsDocument } from './types.ts'
 import type { SettingsDocumentOpenValue } from './types.ts'
 
 export { CredentialsController } from './credentials.ts'
@@ -74,6 +76,7 @@ declare module '@deepseek-ai/cordis' {
  * `settings/conflict` or `settings/rejected` with the service's message.
  */
 export class SettingsController extends TypertRemoteService {
+  private readonly instructions = new GlobalInstructionsFile()
   private readonly openTextFile: (path: string, signal: AbortSignal) => Promise<void>
 
   /**
@@ -182,6 +185,24 @@ export class SettingsController extends TypertRemoteService {
       if (isAborted(signal)) throw new RemoteError('gateway/cancelled', 'settings document open was aborted', {})
       throw new RemoteError('gateway/internal', `path open failed: ${messageOf(error)}`, {}, { cause: error })
     }
+  }
+
+  /** Read the process-home AGENTS.md; callers cannot choose a filesystem path.
+   * @returns Markdown, resolved path and revision used for a guarded save.
+   */
+  @Remote
+  readGlobalInstructions(): Promise<GlobalInstructionsDocument> {
+    return this.instructions.read()
+  }
+
+  /** Save global Markdown without overwriting a newer editor revision.
+   * @param content - complete Markdown text.
+   * @param revision - revision returned by the last read.
+   * @returns the committed document.
+   */
+  @Remote
+  saveGlobalInstructions(content: string, revision: string): Promise<GlobalInstructionsDocument> {
+    return this.instructions.save(content, revision)
   }
 
   private async write(

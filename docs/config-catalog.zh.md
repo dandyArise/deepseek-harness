@@ -264,7 +264,7 @@ export interface Config {
 ## `@deepseek-ai/dsh-api-session-controller`
 
 - `inject`: `agentDefaultModel` · `agents` · `attachments` · `fileUploads` · `fs` · `llm` · `remoteAccess` · `sessions` · `sessionProjections` · `sessionQuery` · `typert` · `typertGateway` · `workspaceRegistry`
-- `source`: [`packages/api/session-controller/src/index.ts:111`](../packages/api/session-controller/src/index.ts)
+- `source`: [`packages/api/session-controller/src/index.ts:113`](../packages/api/session-controller/src/index.ts)
 
 ```ts config-catalog
 /** Session Controller deployment policy. */
@@ -282,7 +282,7 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-api-settings-controller`
 
-- `source`: [`packages/api/settings-controller/src/index.ts:35`](../packages/api/settings-controller/src/index.ts)
+- `source`: [`packages/api/settings-controller/src/index.ts:37`](../packages/api/settings-controller/src/index.ts)
 
 ```ts config-catalog
 /** Host integrations replaceable by direct unit tests. */
@@ -350,7 +350,7 @@ export interface Config {
 ## `@deepseek-ai/dsh-api-workspace-controller`
 
 - `inject`: `remoteAccess` · `typert` · `workspaceRegistry`
-- `source`: [`packages/api/workspace-controller/src/index.ts:37`](../packages/api/workspace-controller/src/index.ts)
+- `source`: [`packages/api/workspace-controller/src/index.ts:38`](../packages/api/workspace-controller/src/index.ts)
 
 ```ts config-catalog
 /** First-use directory policy for the Host account. */
@@ -1721,7 +1721,7 @@ export interface Config {
 ## `@deepseek-ai/dsh-hmr`
 
 - `refs`: `ChokidarOptions` (`chokidar`)
-- `source`: [`packages/boot/hmr/src/index.ts:56`](../packages/boot/hmr/src/index.ts)
+- `source`: [`packages/boot/hmr/src/index.ts:58`](../packages/boot/hmr/src/index.ts)
 
 ```ts config-catalog
 /** Module roots and watcher timing, with Chokidar deployment options. */
@@ -2065,8 +2065,8 @@ export interface Config extends ProtocolConfig, ModelListingConfig {
 ## `@deepseek-ai/dsh-llm-pi-ai`
 
 - `inject`: `llm`
-- `refs`: `Api` (`@earendil-works/pi-ai`) · `CacheRetention` (`@earendil-works/pi-ai`) · `Model` (`@earendil-works/pi-ai`) · `ModelThinkingLevel` (`@earendil-works/pi-ai`) · `OpenAICompletionsCompat` (`@earendil-works/pi-ai`) · [`RetryPolicyConfig`](../packages/llm/llm/src/index.ts) · `ThinkingBudgets` (`@earendil-works/pi-ai`) · `Transport` (`@earendil-works/pi-ai`) · `Volatile` (`@deepseek-ai/cordis`)
-- `source`: [`packages/llm/llm-pi-ai/src/config.ts:251`](../packages/llm/llm-pi-ai/src/config.ts)
+- `refs`: `Api` (`@earendil-works/pi-ai`) · `CacheRetention` (`@earendil-works/pi-ai`) · [`LmStudioModelMetadata`](../packages/llm/llm/src/index.ts) · `Model` (`@earendil-works/pi-ai`) · `ModelThinkingLevel` (`@earendil-works/pi-ai`) · `OpenAICompletionsCompat` (`@earendil-works/pi-ai`) · [`RetryPolicyConfig`](../packages/llm/llm/src/index.ts) · `ThinkingBudgets` (`@earendil-works/pi-ai`) · `Transport` (`@earendil-works/pi-ai`) · `Volatile` (`@deepseek-ai/cordis`)
+- `source`: [`packages/llm/llm-pi-ai/src/config.ts:252`](../packages/llm/llm-pi-ai/src/config.ts)
 
 ```ts config-catalog
 /** Plugin configuration: the provider routes this instance owns. */
@@ -2187,6 +2187,8 @@ export interface PiAiProviderProfile {
 
 /** One configured model entry: an id plus the catalog fields it overrides. */
 export interface PiAiModelProfile {
+  /** Imported capabilities, loaded context and manual overrides for LM Studio. */
+  lmStudio?: LmStudioModelMetadata
   /** Model id sent to the provider and accepted by {@link GenerateOptions.model}. */
   id: string
   /** Display name for selectors; defaults to the catalog name, then the id. */
@@ -2435,7 +2437,7 @@ export interface ReplayModelConfig {
 ## `@deepseek-ai/dsh-llm-retry`
 
 - `inject`: `agents` · `sessionProjections`
-- `source`: [`packages/llm/llm-retry/src/index.ts:26`](../packages/llm/llm-retry/src/index.ts)
+- `source`: [`packages/llm/llm-retry/src/index.ts:30`](../packages/llm/llm-retry/src/index.ts)
 
 ```ts config-catalog
 /** This policy executor has no config; providers own `retryPolicy`. */
@@ -2643,6 +2645,34 @@ export interface Config {
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-message-feedback -->
+
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-missions -->
+<a id="deepseek-aidsh-missions"></a>
+
+## `@deepseek-ai/dsh-missions`
+
+- `inject`: `tools` · `subagents` · `sessions` · `sessionProjections` · `agents`
+- `refs`: `z` (`zod`)
+- `source`: [`packages/experimental/missions/src/index.ts:17`](../packages/experimental/missions/src/index.ts)
+
+```ts config-catalog
+/** Explicit opt-in and host-controlled role routes. */
+export interface Config {
+  /** Enable mission tool registration; disabled by default. */
+  enabled?: boolean
+  /** Host-approved model routes and tool permissions for mission roles. */
+  roles?: Role[]
+  /** Bounds on mission tasks, execution steps, time and result sizes. */
+  limits?: Limits
+}
+
+/** Validated role configuration. */
+export type Role = z.infer<typeof roleSchema>
+
+/** Validated mission limits. */
+export type Limits = z.infer<typeof limitsSchema>
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-missions -->
 
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-office-kit -->
 <a id="deepseek-aidsh-office-kit"></a>
@@ -3015,7 +3045,7 @@ export type Config = LocalConfig
 
 ## `@deepseek-ai/dsh-repeat-tool-reminder`
 
-- `source`: [`packages/guard/repeat-tool-reminder/src/index.ts:35`](../packages/guard/repeat-tool-reminder/src/index.ts)
+- `source`: [`packages/guard/repeat-tool-reminder/src/index.ts:36`](../packages/guard/repeat-tool-reminder/src/index.ts)
 
 ```ts config-catalog
 /**
@@ -3042,6 +3072,8 @@ export interface Config {
    * always compares the FULL canonical string).
    */
   argumentsPreviewChars?: number
+  /** Optional advisory threshold for identical outcomes despite different arguments; 0 disables it. */
+  sameResultThreshold?: number
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-repeat-tool-reminder -->
@@ -3298,7 +3330,7 @@ export interface Config {
 
 - `inject`: `sessions`
 - `refs`: [`SessionQueryConfig`](../packages/session-query/session-query/src/index.ts)
-- `source`: [`packages/session-query/session-query-sqlite/src/index.ts:92`](../packages/session-query/session-query-sqlite/src/index.ts)
+- `source`: [`packages/session-query/session-query-sqlite/src/index.ts:93`](../packages/session-query/session-query-sqlite/src/index.ts)
 
 ```ts config-catalog
 /** Combined session-query configuration backed by SQLite full-text search. */
@@ -3761,7 +3793,7 @@ export type JournalMode = 'wal' | 'delete' | 'truncate' | 'persist'
 
 - `inject`: `workingDirectory` · `sessionProjections`
 - `refs`: `Volatile` (`@deepseek-ai/cordis`)
-- `source`: [`packages/subagent/subagent/src/index.ts:186`](../packages/subagent/subagent/src/index.ts)
+- `source`: [`packages/subagent/subagent/src/index.ts:188`](../packages/subagent/subagent/src/index.ts)
 
 ```ts config-catalog
 /** Host configuration for continuable subagent capacity. */
@@ -5116,6 +5148,31 @@ export interface Config {
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-webhook-github -->
+
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-work-validation -->
+<a id="deepseek-aidsh-work-validation"></a>
+
+## `@deepseek-ai/dsh-work-validation`
+
+- `inject`: `tools` · `fs` · `workingDirectory` · `sessionProjections`
+- `source`: [`packages/experimental/work-validation/src/index.ts:26`](../packages/experimental/work-validation/src/index.ts)
+
+```ts config-catalog
+/** Bounded correction and filesystem observation policy; disabled leaves existing behavior unchanged. */
+export interface Config {
+  /** Enable evidence collection and bounded final-answer correction. */
+  enabled?: boolean
+  /** Maximum corrections requested for unsupported success claims per turn. */
+  maxCorrections?: number
+  /** Maximum continuation steps after the first validation report. */
+  maxValidationSteps?: number
+  /** Maximum number of files inspected per project fingerprint. */
+  maxFiles?: number
+  /** Maximum total file bytes inspected per project fingerprint. */
+  maxBytes?: number
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-work-validation -->
 
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-workflow-ptc -->
 <a id="deepseek-aidsh-workflow-ptc"></a>

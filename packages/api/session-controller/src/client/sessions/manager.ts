@@ -680,6 +680,7 @@ export class SessionManager {
   /**
    * Apply one Session removal forwarded through `ctx.remote.$on`.
    * @param sessionId - removed Session identity.
+   * @param permanent - discard durable state when the log was permanently deleted.
    */
   handleSessionRemoved(sessionId: SessionId, permanent = false): void {
     const durableSubagent = !permanent && (this.subagentAddress(sessionId) !== undefined

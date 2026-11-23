@@ -10,7 +10,7 @@ import { CompactionEngine, ManualCompactionError } from '@deepseek-ai/dsh-compac
 import type { CompactionResult, CompactionTrigger } from '@deepseek-ai/dsh-compaction'
 import type { EpochHeader, Session, SessionSeq } from '@deepseek-ai/dsh-session'
 import type { ProjectionHandle } from '@deepseek-ai/dsh-session-projection'
-import { CONTEXT_WINDOW_EXCEEDED_CODE, LlmError } from '@deepseek-ai/dsh-llm'
+import { CONTEXT_WINDOW_EXCEEDED_CODE, LlmError, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import type { CommandId } from '@deepseek-ai/dsh-commands/types'
@@ -29,7 +29,7 @@ import {
   compactSurfaceRegion,
   selectCompactableRange,
 } from './region.ts'
-import { summarizeWithLlm } from './summarizer.ts'
+import { CONCISE_COMPACTION_INSTRUCTION, summarizeWithLlm } from './summarizer.ts'
 import type { SummarizationInput, SummaryResult, SummaryRoute } from './summarizer.ts'
 import type {
   BasicCompactionConfig,
@@ -139,6 +139,8 @@ export class BasicCompactionEngine extends CompactionEngine {
   private readonly warnedPressureConfigTargets = new Set<string>()
   private readonly overflowRetries = new WeakMap<Agent, number>()
   private readonly overflowAgents = new WeakMap<Session, Agent>()
+  /** Proposed routes are not committed until switch compaction succeeds. */
+  private readonly pendingSummaryRoutes = new WeakMap<Agent, SummaryRoute>()
   /** Registered at construction; `summarize()` awaits it, so no read precedes readiness. */
   private readonly answeredRoute: Promise<ProjectionHandle<AnsweredRoute>>
 
@@ -202,6 +204,7 @@ export class BasicCompactionEngine extends CompactionEngine {
         || (previous.config.provider === config.provider && previous.config.model === config.model)) return config
       try {
         const header = { ...previous, config }
+        this.pendingSummaryRoutes.set(agent, { provider: config.provider, model: config.model })
         const result = await this.compactPressure(agent, header, signal, true)
         if (result !== null) logResult(result, 'model switch')
       } catch (error: unknown) {
@@ -213,6 +216,8 @@ export class BasicCompactionEngine extends CompactionEngine {
           'MODEL_SWITCH_COMPACTION_FAILED',
           { cause: error },
         )
+      } finally {
+        this.pendingSummaryRoutes.delete(agent)
       }
       return config
     }, { prepend: true })
@@ -290,10 +295,33 @@ export class BasicCompactionEngine extends CompactionEngine {
     agent: Agent,
     signal?: AbortSignal,
   ): Promise<SummaryResult> {
-    const target = conversationTarget(agent, (await this.answeredRoute).stateOf(agent.session))
-    const config = target === undefined
+    let target = conversationTarget(agent, (await this.answeredRoute).stateOf(agent.session))
+    let config = target === undefined
       ? this.config
       : resolveTargetPolicy(this.config, target)
+    if (target !== undefined && !config.summarizationProvider) {
+      let info
+      try {
+        info = await this.ctx.llm.resolveModelInfo(target.provider, target.model, signal)
+      } catch (error) {
+        const current = this.pendingSummaryRoutes.get(agent) ?? routedTarget(agent.session)
+        // A removed catalogue entry cannot summarize. Stay on the user's
+        // current provider; do not hide authentication or transport failures.
+        if (!(error instanceof LlmError) || error.code !== 'UNKNOWN_MODEL'
+          || current === undefined || current.provider !== target.provider || current.model === target.model) throw error
+        target = current
+        config = resolveTargetPolicy(this.config, target)
+        info = await this.ctx.llm.resolveModelInfo(target.provider, target.model, signal)
+      }
+      const window = info.lmStudio?.loadedContext
+      if (window !== undefined) {
+        // Small local instances cannot replay the full tool catalog merely for
+        // cache alignment. Summary calls are text-only and never execute tools.
+        const maxTokens = Math.min(config.maxTokens, Math.max(1, Math.floor(window / 4)))
+        return summarizeWithLlm(this.ctx, { ...config, concise: true, maxTokens },
+          { messages: input.messages }, agent, target, signal)
+      }
+    }
     return summarizeWithLlm(this.ctx, config, input, agent, target, signal)
   }
 
@@ -320,6 +348,14 @@ export class BasicCompactionEngine extends CompactionEngine {
       case 'context-overflow': {
         this.ctx.get('toolResultPruner')?.pruneSession(agent.session)
         const measurement = this.ctx.tokenMeter.measure(agent.session)
+        let window: number | undefined
+        try {
+          window = (await this.ctx.llm.resolveModelInfo(header.config.provider, header.config.model, signal)).lmStudio?.loadedContext
+        } catch (error) {
+          // Middleware and custom summarizers may recover routes without a registered adapter.
+          if (!(error instanceof LlmError) || error.code !== 'NO_ADAPTER') throw error
+        }
+        if (window !== undefined) return this.compactPressure(agent, header, signal, true, true)
         const range = selectCompactableRange(agent.session, measurement, 0)
         if (range === null) return null
         return this.compactRegion(range.start, range.end, agent, signal)
@@ -336,6 +372,7 @@ export class BasicCompactionEngine extends CompactionEngine {
     header: EpochHeader,
     signal: AbortSignal,
     requireBelowThreshold: boolean,
+    preserveLatestUser = false,
   ): Promise<CompactionResult | null> {
     const target = header.config
     const policy = resolveTargetPolicy(this.config, target)
@@ -357,7 +394,12 @@ export class BasicCompactionEngine extends CompactionEngine {
       info.context.contextWindow,
       reservedCompletionTokens(header, info.defaultMaxTokens),
     )
-    if (measurement.totalTokens < spec.thresholdTokens) return null
+    // History summaries cannot reduce tool declarations. At pre-step this may
+    // still be the previous, oversized catalogue; let the freshly prepared
+    // executor presentation replace it before attempting any LLM summary.
+    if (Math.ceil(JSON.stringify(header.tools ?? []).length / 4) >= spec.thresholdTokens) return null
+    // Overflow recovery must reduce history even when the local estimate was too low.
+    if (!preserveLatestUser && measurement.totalTokens < spec.thresholdTokens) return null
 
     // Once pressure qualifies, land the model-free pass before choosing a
     // summary range, then remeasure through the singleton replay fold.
@@ -365,11 +407,29 @@ export class BasicCompactionEngine extends CompactionEngine {
       prune.pruneSession(agent.session)
       measurement = meter.measure(agent.session, header)
     }
-    if (measurement.totalTokens < spec.thresholdTokens) return null
+    if (!preserveLatestUser && measurement.totalTokens < spec.thresholdTokens) return null
 
     let result: CompactionResult | null = null
-    for (let attempt = 0; attempt <= spec.compactionRetries; attempt += 1) {
-      const range = selectCompactableRange(agent.session, measurement, spec.retainTokens)
+    const summaryTarget = conversationTarget(agent, (await this.answeredRoute).stateOf(agent.session))
+    const sameSummaryRoute = !policy.summarizationProvider
+      && summaryTarget?.provider === target.provider && summaryTarget.model === target.model
+    // Small loaded windows require multiple bounded chunks rather than one
+    // oversized summary request. Allow enough passes to consume those chunks.
+    const retries = info.lmStudio?.loadedContext === undefined ? spec.compactionRetries : Math.max(spec.compactionRetries, 3)
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      const window = info.lmStudio?.loadedContext
+      // Include the system head, directive and reply when packing a summary.
+      // Explicit alternate summarizers retain the previous conservative bound.
+      const summaryReply = window === undefined ? 0 : Math.min(policy.maxTokens, Math.max(1, Math.floor(window / 4)))
+      const summaryDirective = meter.estimateMessage(createUserMessage({
+        source: { kind: 'user' }, content: [{ type: 'text', text: CONCISE_COMPACTION_INSTRUCTION }],
+      }))
+      const summaryInputBudget = window === undefined ? 0 : sameSummaryRoute
+        ? Math.max(0, window - summaryReply - summaryDirective) : Math.floor(window / 2)
+      // Keep the current instruction verbatim on ordinary pressure compaction,
+      // too: a summary must not replace the task the model is about to answer.
+      const range = selectCompactableRange(agent.session, measurement, preserveLatestUser ? 0 : spec.retainTokens,
+        window === undefined ? undefined : { maxTokens: summaryInputBudget, preserveLatestUser: true })
       if (range === null) {
         if (result === null && !requireBelowThreshold) return null
         throw new Error(
@@ -383,7 +443,7 @@ export class BasicCompactionEngine extends CompactionEngine {
     }
 
     throw new Error(
-      `compaction still above threshold after ${spec.compactionRetries + 1} compaction attempts `
+      `compaction still above threshold after ${retries + 1} compaction attempts `
       + `(${measurement.totalTokens} estimated tokens >= threshold ${spec.thresholdTokens})`,
     )
   }

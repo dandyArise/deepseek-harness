@@ -9,7 +9,7 @@
   en: 6cc2cd9ced70bb09
   zh: 1c0e6cb4ba2ed637
 /tool-schema-catalog/tool-package-map:
-  en: 4e5bb11e4664bb1c
+  en: f87268700e4b33de
   zh: 4855556d38701373
 /tool-schema-catalog/deepseek-ai-dsh-plugin-manager:
   en: e0143916bb634762
@@ -275,6 +275,9 @@
 /tool-schema-catalog/deepseek-ai-dsh-tool-subagent-control:
   en: ab82e130c3413f04
   zh: ab82e130c3413f04
+/tool-schema-catalog/deepseek-ai-dsh-tool-subagent-control/archive-completed-agents:
+  en: 21dd56b77f350723
+  zh: 0f826c7da437cd7d
 /tool-schema-catalog/deepseek-ai-dsh-tool-subagent-control/interrupt-agent:
   en: a622b15cc2598d51
   zh: ece4b2af6a11c49c

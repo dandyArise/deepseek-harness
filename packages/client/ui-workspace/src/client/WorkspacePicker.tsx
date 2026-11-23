@@ -281,7 +281,12 @@ function surfaceFlow(
  */
 export function WorkspacePicker(props: WorkspacePickerProps) {
   const { renderSlot } = props
-  return surfaceFlow(props, owner => renderSlot('conversation.hero.workspace.directoryFlow', owner))
+  return <>
+    {props.startDiscussion === undefined ? null : <Button onClick={props.startDiscussion}>
+      {props.t('discussion.start')}
+    </Button>}
+    {surfaceFlow(props, owner => renderSlot('conversation.hero.workspace.directoryFlow', owner))}
+  </>
 }
 
 /**

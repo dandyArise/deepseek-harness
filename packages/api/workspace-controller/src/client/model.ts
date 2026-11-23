@@ -182,6 +182,11 @@ export class ClientWorkspaceModel implements WorkspaceFollowSink {
     return result
   }
 
+  /**
+   * Request permanent deletion through the Host workspace registry.
+   * @param sessionId - session whose durable history is to be removed.
+   * @returns the remote deletion acknowledgement or failure.
+   */
   deleteSession(sessionId: WorkspaceDeleteSessionRequest['sessionId']): Promise<RemoteResult<WorkspaceDeleteValue>> {
     return this.remote.deleteSession({ sessionId })
   }

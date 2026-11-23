@@ -13,6 +13,9 @@ permissions:
 
 jobs:
   policy:
+    # The trusted policy targets the upstream organization's private Project
+    # and repository. Forks run the code checks, not that organization's policy.
+    if: github.repository == 'deepseek-harness/deepseek-harness'
     name: Issue policy
     runs-on: ubuntu-latest
     steps:

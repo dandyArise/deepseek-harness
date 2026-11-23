@@ -14,7 +14,9 @@ import SessionStore, {
   SessionPreparation,
 } from '@deepseek-ai/dsh-session'
 import AgentRegistry, { type AgentHandle } from '@deepseek-ai/dsh-agent'
-import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+// Benchmark-only override: compare saved built artifacts in fresh processes.
+const JsonlSessionPersistence: typeof import('@deepseek-ai/dsh-session-persistence-jsonl') = await import(process.env.DSH_SESSION_OPEN_PERSISTENCE
+  ?? '@deepseek-ai/dsh-session-persistence-jsonl')
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SessionQueryEngine from '@deepseek-ai/dsh-session-query'
 import type {
@@ -167,6 +169,17 @@ class SessionBenchmarkHost {
     }
     await installProjectionSet(ctx)
     await ctx.plugin(JsonlSessionPersistence, { root, compression: 'zstd' })
+    if (process.env.DSH_PROFILE_SESSION_OPEN === '1') {
+      const service = ctx.sessionPersistence
+      for (const name of ['ensureRootEncoding', 'findLog', 'requireStoredLog', 'decodeStoredLog', 'readZstdPrefix', 'assertStoredIdentity']) {
+        const original = Reflect.get(service, name) as (...args: unknown[]) => Promise<unknown>
+        Reflect.set(service, name, async function (...args: unknown[]) {
+          const start = performance.now()
+          try { return await original.apply(service, args) }
+          finally { process.stderr.write(`${name}: ${performance.now() - start} ms\n`) }
+        })
+      }
+    }
     let history: WebController | undefined
     if (scenario === 'first-history') {
       new BenchmarkSessionQuery(ctx)

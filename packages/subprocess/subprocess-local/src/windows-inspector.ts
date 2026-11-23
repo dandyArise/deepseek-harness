@@ -12,6 +12,7 @@
 import { spawnSync } from 'node:child_process'
 import type { SubprocessTerminalSignal } from '@deepseek-ai/dsh-subprocess'
 import { createLazyRequire } from '@deepseek-ai/dsh-lazy-require'
+import { rustProcess } from './rust-process.ts'
 import type { ProcessIdentity, ProcessInspector, ProcessSnapshot } from './process-inspector.ts'
 
 type Koffi = typeof import('koffi')['default']
@@ -41,6 +42,8 @@ export interface WindowsProcessInspectorInternals {
   processState(pid: number): WindowsProcessState | undefined
   /** Terminate one process tree; `force` maps to taskkill `/F`. */
   taskkill(pid: number, force: boolean): void
+  /** Optional native hard termination, fencing the same held process handle. */
+  terminateIdentity?(identity: ProcessIdentity): void
 }
 
 /**
@@ -129,6 +132,10 @@ export class WindowsProcessInspector implements ProcessInspector {
   }
 
   signalProcess(identity: ProcessIdentity, signal: 'SIGTERM' | 'SIGKILL'): void {
+    if (signal === 'SIGKILL' && this.internals.terminateIdentity !== undefined) {
+      this.internals.terminateIdentity(identity)
+      return
+    }
     if (this.isAlive(identity)) this.internals.taskkill(identity.pid, signal === 'SIGKILL')
   }
 }
@@ -338,9 +345,15 @@ function windowsProcessState(bindings: Win32Bindings, pid: number): WindowsProce
 
 /** The koffi-backed default internals; bindings resolve lazily on first use. */
 function defaultWindowsProcessInternals(): WindowsProcessInspectorInternals {
+  const native = rustProcess()
   return {
     snapshot: () => snapshotWindowsProcesses(win32Bindings()),
-    processState: pid => windowsProcessState(win32Bindings(), pid),
-    taskkill: taskkillTree,
+    processState: pid => native === undefined ? windowsProcessState(win32Bindings(), pid) : native.state(pid),
+    taskkill: (pid, force) => {
+      if (!force || native === undefined) { taskkillTree(pid, force); return }
+      const state = native.state(pid)
+      if (state?.active) native.terminate({ pid, started: state.started })
+    },
+    ...(native === undefined ? {} : { terminateIdentity: (identity: ProcessIdentity) => { native.terminate(identity) } }),
   }
 }

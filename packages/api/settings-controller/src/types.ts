@@ -32,3 +32,10 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
 export interface SettingsDocumentOpenValue {
   readonly opened: true
 }
+
+/** Editable process-home instructions, independent of the selected workspace. */
+export interface GlobalInstructionsDocument {
+  readonly path: string
+  readonly content: string
+  readonly revision: string
+}

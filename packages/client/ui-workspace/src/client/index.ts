@@ -368,6 +368,7 @@ export function apply(ctx: Context): void {
       workspaceShortcuts: shortcutControls.state, shortcuts: ctx.shortcuts.catalog },
   })
   const pickerInjected = (directoryFlow: HostObservable<boolean>) => (): WorkspacePickerInjected => ({
+    startDiscussion: () => { uiWorkspace.startSession(undefined, { agentPreset: 'discussion' }) },
     createWorkspace: input => workspaces.create(input),
     hooks: { directoryFlow },
   })

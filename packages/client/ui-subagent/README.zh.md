@@ -25,6 +25,8 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
+管理弹窗支持修改本地子智能体的显示名称（1–200 字符），作为父会话的弹窗元数据持久化；技术名称和会话地址保持不变，重试及打开会话仍定位原智能体。归档区也可重命名。自动归档仅针对成功结束的本地运行，失败、停止和运行中的智能体保持可见。恢复不会删除历史或用量，归档智能体仍计入总 token 用量。名称、归档状态与自动归档设置在重启和日志重放后保留。
+
 会话页头的普通面包屑使用会话标题。subagent 面包屑优先使用创建时的原始描述（`entry.label`），其次使用智能体名称（`entry.name`），最后回退到 Session id。普通与 subagent 面包屑标题均使用 14px 文字和 20px 行高。当会话的直接目录有子项或读取失败时，后代数量触发器渲染在页头操作区中预设标签之后，不带任何面包屑分隔符。目录缺席或为空时隐藏数量触发器，除非根 Session 已开启且可用的 Team 任务板有共享任务或任务记录错误。仅开启 Team 模式不会显示空入口。触发器打开该直接目录，以总数作为无障碍名称、运行数作为无障碍描述，并在用户显式打开时发现下一层目录。选择任意深度，即可用该子会话的确切 `{parentSessionId, childSessionId, mode}` 地址打开其对话；也可以使用非当前本地行的行尾箭头在右侧 Sidebar 打开同一地址，并在空间允许时优先使用独立分栏。
 
 本包注册 `dsh-resource://subagentchat/session/<child>?parent=<parent>&mode=<mode>` 资源与 builtin Sidebar tab 类型。资源直接根据地址保留 child 的 `SessionReference`，不刷新 parent 目录，并在 tab 记录关闭时释放 reference。tab 通过 `sidebar.chat.conversation` 渲染共享 `conversation.content` Factory，把局部 View 固定为 Chat，并省略主 Conversation 的 Header 与宽度控制。

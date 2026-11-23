@@ -112,6 +112,8 @@ export const VIEWER_ENDPOINT_CLASSES = {
   'credentials/set': 'owner-only', // owner credentials; secrets never reach a reader
   'credentials/unset': 'owner-only', // owner credentials; secrets never reach a reader
   'settings/describe': 'owner-only', // owner settings
+  'settings/readGlobalInstructions': 'owner-only', // private owner instructions
+  'settings/saveGlobalInstructions': 'owner-only', // owner instructions mutation
   'settings/mutate': 'owner-only', // owner settings
   'settings/openSettingsDocument': 'owner-only', // owner settings
   'settings/replace': 'owner-only', // owner settings

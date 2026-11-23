@@ -213,6 +213,12 @@ export class SubagentRuntime extends TypertRemoteService {
     this.emitLifecycle = createLifecycleEmitter(this.ctx, parent => scopeTarget(this, parent))
   }
 
+  /**
+   * Update parent-owned archive state using the manager's live activity check.
+   * @param parent - session owning the direct-child catalog.
+   * @param update - requested archive, restoration, rename or preference operation.
+   * @returns the resulting archive snapshot.
+   */
   updateArchive(parent: Session, update: SubagentArchiveUpdate): Promise<SubagentArchiveState> {
     return updateSubagentArchive(this.ctx, parent, update, id => this.manager?.hasActiveRun(id) ?? false)
   }
@@ -221,7 +227,7 @@ export class SubagentRuntime extends TypertRemoteService {
     const ctx = this.ctx
     const catalogProjection = await ctx.sessionProjections.register(subagentCatalogProjectionDefinition)
     await ctx.sessionProjections.register(subagentArchiveProjection)
-    ctx.on('subagent/start', info => applySubagentArchiveLifecycle(ctx, info.parentSessionId, info.id, false))
+    ctx.on('subagent/start', (info) => { applySubagentArchiveLifecycle(ctx, info.parentSessionId, info.id, false) })
     ctx.on('subagent/end', (info) => {
       if (info.local && info.stopReason === 'completed') applySubagentArchiveLifecycle(ctx, info.parentSessionId, info.id, true)
     })

@@ -45,6 +45,8 @@ Settings visibility and section selection live in the shell owner store. The she
 
 ### The General section
 
+Settings also provides **Global instructions**, a Markdown editor for `$DSH_HOME/AGENTS.md`. Reading an absent file yields an empty draft; Save creates it. Changes preserve Markdown verbatim and reject stale revisions; failed saves retain the draft. The authenticated API chooses the path, never the browser. Saving does not restart Harness; instructions follow new-session and resume reconciliation. Shared agents-home and project files are not edited. This section supports French and English, with English fallback for other locales.
+
 The current release version appears at the bottom of General Settings in Web and Desktop, using the build’s `DSH_CLIENT_VERSION` metadata and the active language. Partial builds without version metadata omit the row.
 
 The Coding Tools switch controls the shared `ui-settings.enabled` preference described by [ui-settings](../ui-settings/README.md#use-this-package). It is available in both Web and desktop, follows accepted changes immediately, and disables duplicate input while a write settles. A failed write displays localized retry guidance. On Desktop, a change made with this switch reports `code_work_view_toggle` with the new value through the optional [product analytics](../product-analytics/README.md) service, timestamped at the click. Only a write that changes a known value and leaves the preference at the requested value reports; requesting the current value, an unknown previous value, a failed write, and preference updates made elsewhere report nothing.

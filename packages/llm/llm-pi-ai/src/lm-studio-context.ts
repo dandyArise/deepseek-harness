@@ -7,11 +7,20 @@ import type { GenerateOptions } from '@deepseek-ai/dsh-llm'
 const execute = promisify(execFile)
 const resizes = new Map<string, Promise<number | undefined>>()
 
+/**
+ * Await an already-running resize for this endpoint and model without starting one.
+ * @param baseURL - endpoint used to identify the local server.
+ * @param model - selected instance identifier.
+ */
 export async function waitForLmStudioResize(baseURL: string, model: string): Promise<void> {
   await resizes.get(new URL(baseURL).origin + '/' + model)
 }
 
-/** A heuristic for preflight. The server's measured count takes precedence on a rejection. */
+/**
+ * A heuristic for preflight. The server's measured count takes precedence on a rejection.
+ * @param options - request messages, system prompt and tool definitions.
+ * @returns estimated input tokens including message overhead.
+ */
 export function estimateLmStudioPrompt(options: GenerateOptions): number {
   let chars = options.system?.length ?? 0
   for (const message of options.messages) {
@@ -24,6 +33,22 @@ export function estimateLmStudioPrompt(options: GenerateOptions): number {
   return Math.ceil(chars / 4) + options.messages.length * 4
 }
 
+/** Preserve the reply cap already admitted against the live instance instead of
+ * applying the SDK's fixed 4096-token safety reservation a second time.
+ * @param payload - serialized provider request.
+ * @param maxTokens - previously admitted reply capacity.
+ * @returns a payload with the reply cap restored, or an unchanged non-object input.
+ */
+export function lmStudioReplyBudget(payload: unknown, maxTokens: number): unknown {
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return payload
+  return { ...payload, ...('max_tokens' in payload ? { max_tokens: maxTokens } : { max_completion_tokens: maxTokens }) }
+}
+
+/**
+ * Extract measured input and loaded-window sizes from a confirmed LM Studio overflow.
+ * @param detail - provider error text, including possibly escaped JSON.
+ * @returns validated counts, or undefined when the error does not establish an overflow.
+ */
 export function lmStudioOverflow(detail: string): { prompt: number; loaded: number } | undefined {
   if (!detail.includes('exceed_context_size_error')) return
   const fields = detail.replaceAll('\\"', '"')
@@ -52,7 +77,16 @@ async function localCli(args: string[], timeout: number): Promise<string> {
   return stdout
 }
 
-/** Reload only the selected idle local LLM. Concurrent callers share a reload. */
+/**
+ * Reload only the selected idle local LLM. Concurrent callers share a reload.
+ * @param baseURL - loopback OpenAI endpoint whose server must match the local CLI.
+ * @param model - selected instance identifier.
+ * @param needed - minimum requested context capacity.
+ * @param max - maximum permitted context capacity.
+ * @param signal - caller cancellation checked before unloading.
+ * @param cli - local LM Studio command runner.
+ * @returns the resulting capacity, or undefined when safe resizing is unavailable.
+ */
 export async function resizeLmStudioContext(baseURL: string, model: string, needed: number, max: number,
   signal?: AbortSignal, cli = localCli): Promise<number | undefined> {
   const url = new URL(baseURL)
@@ -66,7 +100,7 @@ export async function resizeLmStudioContext(baseURL: string, model: string, need
     return size !== undefined && size >= needed ? size : undefined
   }
   const operation = (async () => {
-    const server = JSON.parse(await cli(['server', 'status', '--json'], 5000))
+    const server = JSON.parse(await cli(['server', 'status', '--json'], 5000)) as { running?: boolean; port?: number }
     if (!server.running || server.port !== Number(url.port || (url.protocol === 'https:' ? 443 : 80))) return
     const instances = (JSON.parse(await cli(['ps', '--json'], 5000)) as Instance[]).filter(item => item.type === 'llm')
     const instance = instances.find(item => item.identifier === model)

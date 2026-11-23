@@ -30,7 +30,7 @@ it('continues truncated text once and leaves another truncation available for ma
   const { agent, adapter, ctx } = await setup([maxTokensResponse('First part'), maxTokensResponse('Second part')])
   agent.followup(createUserMessage({ content: [{ type: 'text', text: 'original task' }], source: { kind: 'user' } }))
   await agent.whenIdle()
-  await vi.waitFor(() => expect(adapter.requests).toHaveLength(2))
+  await vi.waitFor(() => { expect(adapter.requests).toHaveLength(2) })
   await agent.whenIdle()
   expect(adapter.requests[1]!.messages.at(-1)?.content).toEqual([{ type: 'text', text: 'Continue the previous response in its original language from where it stopped.' }])
   expect(ctx.sessionProjections.snapshot(agent.session).values.conversationContinuation).not.toBeNull()

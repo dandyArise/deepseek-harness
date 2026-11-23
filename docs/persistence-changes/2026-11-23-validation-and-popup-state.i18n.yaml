@@ -1,0 +1,28 @@
+# Bilingual-pair consistency record for 2026-11-23-validation-and-popup-state.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/persistence-changes/2026-11-23-validation-and-popup-state.md
+/:
+  en: 3d5a424ae7d7e46b
+  zh: c22a8e4a62d8cc1a
+/2026-11-23-validation-and-popup-state:
+  en: 8156ac1cd68031a5
+  zh: eb26ce1dfc98db34
+/2026-11-23-validation-and-popup-state/summary:
+  en: 5e7785046cb5f1e1
+  zh: ac227e032f146396
+/2026-11-23-validation-and-popup-state/table-of-contents:
+  en: 6cf314a069ceb451
+  zh: 9adff678e9ecab3b
+/2026-11-23-validation-and-popup-state/declaration:
+  en: 6907136f28e48c90
+  zh: 02f8298485f3d8e7
+/2026-11-23-validation-and-popup-state/compatibility:
+  en: 3efe1600f178f9e9
+  zh: 872ae67daa063d97
+/2026-11-23-validation-and-popup-state/verification:
+  en: 05650d8a3d531ee8
+  zh: 9c1f3e3255dcd9bb
+/2026-11-23-validation-and-popup-state/dev-note:
+  en: b75c8458928b72b9
+  zh: 003ba4e17b4b5269

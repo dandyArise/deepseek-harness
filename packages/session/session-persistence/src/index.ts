@@ -209,7 +209,10 @@ export abstract class SessionPersistence extends Service {
    */
   abstract list(options?: SessionPersistenceListOptions): Promise<readonly SessionPersistenceSnapshot[]>
 
-  /** Permanently erase this session's durable history after its writer has closed. */
+  /**
+   * Permanently erase this session's durable history after its writer has closed.
+   * @param id - session identity whose stored log must be removed.
+   */
   async delete(id: SessionId): Promise<void> {
     const header = await this.deleteStoredLog(id)
     await this.ctx.parallel('session/deleted', id, header)

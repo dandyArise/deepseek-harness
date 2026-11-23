@@ -123,6 +123,8 @@ export interface RuntimeResolutionEntry {
   readonly name: string
   /** Package directory selected by the existing dependency traversal. */
   readonly packageDir: string
+  /** Canonical installation directory observed when this generation read the package manifest. */
+  readonly canonicalPackageDir?: string
   /** Selected package version when its manifest declares one. */
   readonly version: string | undefined
   /** Manifest whose dependency edge selected this package. */
@@ -317,27 +319,21 @@ function profileDependencyNames(manifest: ProfileManifest): string[] {
 /** Resolve the installation packages that the runtime resolver supplies to every profile. */
 function collectInstallationScopePackages(
   installAnchor: string, skippedBundles: ReadonlySet<string>,
-): {
-  packageNames: ReadonlySet<string>
-  packageDirs: ReadonlyMap<string, string>
-  declarers: ReadonlyMap<string, string>
-  versions: ReadonlyMap<string, string | undefined>
-} {
+): Map<string, RuntimeResolutionEntry> {
   // Real declaring paths keep workspace symlinks under node_modules from disabling tsx path mappings.
   const canonicalAnchor = join(realModuleDirectory(dirname(installAnchor)), basename(installAnchor))
   const appManifest = readPackageManifest(canonicalAnchor)
-  const links = new Map<string, string>()
-  const declarers = new Map<string, string>()
-  const versions = new Map<string, string | undefined>()
+  const entries = new Map<string, RuntimeResolutionEntry>()
   /* v8 ignore next -- a real app manifest always declares its name */
   if (appManifest.name !== undefined) {
     // The CLI derives the installation anchor from import.meta.url (already real) and the Desktop Host from its
     // runtime directory (not a symlink); the directory is kept as given rather than canonicalized here.
-    links.set(appManifest.name, dirname(installAnchor))
-    declarers.set(appManifest.name, canonicalAnchor)
-    versions.set(appManifest.name, appManifest.version)
+    entries.set(appManifest.name, Object.freeze({
+      name: appManifest.name, scope: 'installation', version: appManifest.version,
+      packageDir: dirname(installAnchor), canonicalPackageDir: dirname(canonicalAnchor), declarer: canonicalAnchor,
+    }))
   }
-  // BFS over the resolvable dependency graph; the visited set is the link
+  // BFS over the resolvable dependency graph; the visited set is the entry
   // map itself (first resolution wins, matching Node's own nearest-wins).
   const queue: { anchor: string; manifest: ProfileManifest }[] = [{ anchor: canonicalAnchor, manifest: appManifest }]
   for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
@@ -346,12 +342,13 @@ function collectInstallationScopePackages(
     // dependencies, yet out-of-tree plugins import them directly.
     /* v8 ignore next -- a real app manifest always declares dependencies */
     for (const dep of profileDependencyNames(next.manifest)) {
-      if (links.has(dep)) continue
+      if (entries.has(dep)) continue
       const dir = packageDirFromAnchor(next.anchor, dep)
       // A declared-but-uninstalled dependency cannot be a loader-visible
       // plugin; skip it rather than fail the whole boot.
       if (dir === undefined) continue
-      const manifestPath = join(realModuleDirectory(dir), 'package.json')
+      const canonicalPackageDir = realModuleDirectory(dir)
+      const manifestPath = join(canonicalPackageDir, 'package.json')
       let manifest: ProfileManifest
       try {
         manifest = skippedBundles.has(dep) ? readProfileManifest('dsh', dir) : readPackageManifest(manifestPath)
@@ -359,13 +356,14 @@ function collectInstallationScopePackages(
         if (!skippedBundles.has(dep)) throw error
         continue
       }
-      links.set(dep, dir)
-      declarers.set(dep, next.anchor)
-      versions.set(dep, manifest.version)
+      entries.set(dep, Object.freeze({
+        name: dep, scope: 'installation', version: manifest.version,
+        packageDir: dir, canonicalPackageDir, declarer: next.anchor,
+      }))
       queue.push({ anchor: manifestPath, manifest })
     }
   }
-  return { packageNames: new Set(links.keys()), packageDirs: links, declarers, versions }
+  return entries
 }
 
 /** Inputs for {@link createRuntimeResolution}. */
@@ -389,7 +387,7 @@ export async function createRuntimeResolution(
   const { installAnchor, profile, home = resolveDshHome() } = options
   const profilesDir = join(home, PROFILES_DIR)
   const manifest = readOptionalProfileManifest(profile)
-  const { packageNames, packageDirs, declarers, versions } = collectInstallationScopePackages(
+  const installationEntries = collectInstallationScopePackages(
     installAnchor, new Set(profile?.skippedBundles.map(skipped => skipped.packageName)),
   )
   const profileDeclarers = new Map<string, string>()
@@ -397,7 +395,7 @@ export async function createRuntimeResolution(
   const localPackageNames = profile === undefined ? [] : installedProfilePackageNames(profile, manifest)
   const profilePackages: ReadonlyMap<string, string> = profile === undefined
     ? new Map<string, string>()
-    : collectProfileScopePackages(profile, packageNames, profileDeclarers, profileVersions)
+    : collectProfileScopePackages(profile, new Set(installationEntries.keys()), profileDeclarers, profileVersions)
   const linkedRoots = profile === undefined ? [] : linkedProfileRoots(profile, profilesDir)
   // The Promise return type is the pre-stable API; construction has no asynchronous step.
   return await Promise.resolve(new ProfileRuntimeResolution({ installAnchor, profileDir: profile?.dir, home }, {
@@ -406,10 +404,7 @@ export async function createRuntimeResolution(
     localPackageNames: Object.freeze(localPackageNames),
     linkedRoots: Object.freeze(linkedRoots.map(root => Object.freeze(root))),
     entries: Object.freeze([
-      ...[...packageDirs].map(([name, packageDir]) => Object.freeze({
-        name, packageDir, version: versions.get(name),
-        declarer: declarers.get(name) as string, scope: 'installation' as const,
-      })),
+      ...installationEntries.values(),
       ...[...profilePackages].map(([name, packageDir]) => Object.freeze({
         name, packageDir, version: profileVersions.get(name),
         declarer: profileDeclarers.get(name) as string, scope: 'profile' as const,

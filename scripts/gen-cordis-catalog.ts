@@ -319,6 +319,12 @@ export const EVENT_WALK_EXEMPTIONS: Record<string, string> = {
  * appear on more than one page.
  */
 export const LINK_MAP: Readonly<Record<string, string>> = {
+  SessionSubagentArchiveRequest: 'session.md',
+  SessionSubagentArchiveValue: 'session.md',
+  GlobalInstructionsDocument: 'settings.md',
+  WorkspaceDeleteSessionRequest: 'workspace.md',
+  SubagentArchiveState: 'subagent.md',
+  SubagentArchiveUpdate: 'subagent.md',
   AuthenticationProvider: '../../packages/client/connection/README.md#browser-authentication-and-request-trust',
   PeerId: 'typert.md',
   Principal: 'typert.md',

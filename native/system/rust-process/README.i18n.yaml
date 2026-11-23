@@ -1,0 +1,13 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write native/system/rust-process/README.md
+/windows-process-cleanup-in-rust:
+  en: fe080bcee265d8f1
+  zh: 0639ff206981cb95
+/windows-process-cleanup-in-rust/build-and-reproduce-repository-root-windows-powershell:
+  en: 45a623f634c74986
+  zh: 133cec6fead0af7e
+/windows-process-cleanup-in-rust/measurements-2026-11-20-local-windows-node-24-22-3:
+  en: b88b348201b52cfe
+  zh: 02fc00750a8c9630

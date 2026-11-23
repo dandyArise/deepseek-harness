@@ -6,6 +6,10 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { aborted } from 'node:util'
+import { recoverDgx } from './dgx.ts'
 import type { Context, Events } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { z as zod } from 'zod'
@@ -134,6 +138,21 @@ export async function apply(ctx: Context, config: Config = {}, internals: RetryI
       return { ...state, [key]: { retry: event.data.retry, retryId: event.data.retryId } }
     },
   })
+  const pendingToolsReady = ctx.sessionProjections.register({
+    key: 'dgxPendingTools',
+    stateVersion: 1,
+    stateSchema: zod.object({ turn: zod.number().int().nonnegative(), calls: zod.array(zod.string()) }),
+    init: () => ({ turn: 0, calls: [] }),
+    apply: (state, event) => {
+      if (event.type === 'turn/start') return { turn: event.data.turn, calls: [] }
+      if ((event.type !== 'tool/call' && event.type !== 'tool/result') || event.data.turn !== state.turn) return state
+      const calls = new Set(state.calls)
+      if (event.type === 'tool/call') calls.add(event.data.callId)
+      else if (event.data.error?.code === 'TOOL_OUTCOME_UNKNOWN') calls.add(event.data.message.toolCallId)
+      else calls.delete(event.data.message.toolCallId)
+      return { ...state, calls: [...calls] }
+    },
+  })
   const random = internals.random ?? Math.random
   const lifetime = new AbortController()
   const active = new Set<Promise<RequestErrorAction>>()
@@ -195,6 +214,28 @@ export async function apply(ctx: Context, config: Config = {}, internals: RetryI
     if (policy === undefined) return next()
     const llmRetryProjectionHandle = await projectionReady
     if (signal.aborted || ctx.fiber.uid === null || lifetime.signal.aborted) return
+    if (provider === 'dgx-spark' && (failure.code === 'TRANSPORT' || failure.status === 503) && process.env.DSH_HOME
+      && existsSync(join(process.env.DSH_HOME, 'dgx-recovery.json'))) {
+      const key = 'dgx-recovery'
+      if (llmRetryProjectionHandle.stateOf(agent.session)[retryStateKey(provider, key)]) return
+      const pending = (await pendingToolsReady).stateOf(agent.session)
+      if (pending.turn === turn && pending.calls.length) {
+        throw new Error('Reprise suspendue : résultat d’outil incertain.')
+      }
+      const retryId = brandString<RetryId>(randomUUID())
+      agent.session.append('llm/retry', { provider, policyKey: key, retryId, turn, step, mode: 'normal',
+        retry: 1, maxRetries: 1, delayMs: 0, failure: { ...failure, message: 'Vérification et attente du moteur Qwen sur le DGX…' } })
+      const waitSignal = AbortSignal.any([signal, lifetime.signal])
+      try {
+        const recovery = recoverDgx()
+        await Promise.race([recovery, aborted(waitSignal, recovery)])
+      } catch (error) {
+        throw new Error('Récupération DGX interrompue : ' + (error instanceof Error ? error.message : String(error)), { cause: error })
+      }
+      if (waitSignal.aborted) return
+      agent.session.append('llm/retry-started', { retryId, turn, step, retry: 1 })
+      return { kind: 'retry' }
+    }
     if (policy.mode === 'always') {
       const fusedSignal = AbortSignal.any([signal, lifetime.signal])
       // The loop and plugin lifetime stay open until delegated recovery settles.
@@ -254,5 +295,5 @@ export async function apply(ctx: Context, config: Config = {}, internals: RetryI
     lifetime.abort(new Error('llm-retry plugin disposed'))
     await Promise.allSettled([...active])
   }, 'llm-retry: abort and drain active recovery')
-  await projectionReady
+  await Promise.all([projectionReady, pendingToolsReady])
 }

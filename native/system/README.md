@@ -8,6 +8,8 @@ English | [中文](README.zh.md)
 
 ## Summary
 
+The private `./kernels` export also provides opt-in Rust/WASM frame indexing and pressure arithmetic. See [the measured experiment](rust-kernels/README.md). It is disabled by default; it neither replaces native Zstandard nor changes permissions or persistence formats.
+
 Use the Linux `landlock-run` executable to confine subprocesses, or the `./flock` entry to acquire a POSIX write lock. Platform packages contain the precompiled binaries; consumer installation never builds native code. Landlock policy and Session lifecycle remain with callers.
 
 ## Table of Contents

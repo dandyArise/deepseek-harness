@@ -95,7 +95,10 @@ export interface UiWorkspace {
    * @param options - `stopActivity` asks the Host to stop the Session's running work instead of refusing.
    */
   archiveSession(sessionId: SessionId, options?: { readonly stopActivity?: boolean }): Promise<void>
-  /** Release the displayed conversation after its deletion succeeds. */
+  /**
+   * Release the displayed conversation after its deletion succeeds.
+   * @param sessionId - confirmed conversation to delete.
+   */
   deleteSession(sessionId: SessionId): Promise<void>
   /**
    * Unarchive a Session, restoring it to its recorded Workspace position.
@@ -337,6 +340,25 @@ class UiWorkspaceService extends Service implements UiWorkspace {
   }
 
   startSession(workspaceId?: WorkspaceId, options?: StartSessionOptions): void {
+    const selected = this.mainReference?.sessionId
+    const selectedPreset = selected === undefined ? undefined
+      : this.sessions.list.getSnapshot().byId[selected]?.projectionValues?.agentPreset
+    if (workspaceId === undefined && (options?.agentPreset === 'discussion'
+      || (options?.agentPreset === undefined && selectedPreset === 'discussion'))) {
+      const navigation = AbortSignal.any([this.ctx.layout.beginNavigation(), this.lifetime.signal])
+      void this.sessions.create({ agentPreset: 'discussion' }).then((sessionId) => {
+        if (!navigation.aborted) this.replaceMain(sessionId, navigation, 'reveal', (id) => {
+          if (options?.prompt !== undefined) {
+            const binding = this.sessions.binding(id)
+            if (binding === undefined) this.draftPreparationFailed()
+            this.prepareDraft(binding, options)
+          }
+        })
+      }).catch((reason: unknown) => {
+        if (!navigation.aborted) this.notify({ kind: 'createFailed', message: creationFailureMessage(reason) })
+      })
+      return
+    }
     const { agentPreset, ...draft } = options ?? {}
     const draftOptions = options === undefined ? undefined : draft
     const initializeDraft = draftOptions !== undefined && (draftOptions.prompt !== undefined

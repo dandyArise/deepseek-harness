@@ -121,7 +121,7 @@ describe('PiAiAdapter provider routing', () => {
       key: model, type: 'llm', loaded_instances: [{ id: model, config: { context_length: contextLength } }],
     }] }) })
     const server = await mockServer([
-      nativeModels(8192), { events: textEvents }, nativeModels(32768), { events: textEvents },
+      nativeModels(8192), nativeModels(32768), { events: textEvents },
     ])
     const ctx = new Context()
     await ctx.plugin(LlmRuntime)
@@ -132,13 +132,13 @@ describe('PiAiAdapter provider routing', () => {
     } }))
     const history = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'context '.repeat(6000) }] })
     const resume = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Continue.' }] })
-    await assemble(ctx, { provider: 'lmstudio', model, messages: [history] })
+    await expect(assemble(ctx, { provider: 'lmstudio', model, messages: [history] }))
+      .resolves.toMatchObject({ finish: { kind: 'error', failure: { code: CONTEXT_WINDOW_EXCEEDED_CODE } } })
     await assemble(ctx, { provider: 'lmstudio', model, messages: [history, resume] })
     expect(server.paths).toEqual([
-      '/api/v1/models', '/v1/chat/completions', '/api/v1/models', '/v1/chat/completions',
+      '/api/v1/models', '/api/v1/models', '/v1/chat/completions',
     ])
-    expect(server.requests[1]).toMatchObject({ max_completion_tokens: 1 })
-    expect(server.requests[3]).toMatchObject({ max_completion_tokens: 4096 })
+    expect(server.requests[2]).toMatchObject({ max_completion_tokens: 4096 })
   })
 
   it('reports the live Flint context after a reload without requiring a catalog sync', async () => {
@@ -159,34 +159,25 @@ describe('PiAiAdapter provider routing', () => {
     expect(server.paths).toEqual(['/api/v1/models', '/api/v1/models'])
   })
 
-  it.each([
-    { text: 'History', prompt: 12354, loaded: 8192, recovered: 16384, preflight: false },
-    { text: 'x '.repeat(18000), prompt: 18016, loaded: 16384, recovered: 32768, preflight: true },
-  ])('replays a rejected Flint prompt once with messages, tools and cap intact (preflight=$preflight)', async ({ text, prompt, loaded, recovered, preflight }) => {
+  it.each([true, false])('rejects 11937 input tokens without reloading LM Studio (imported metadata: %s)', async (imported) => {
     const model = 'recursivesi/flint'
-    const body = { error: { type: 'exceed_context_size_error', n_prompt_tokens: prompt, n_ctx: loaded,
-      message: `request (${prompt} tokens) exceeds the available context size (${loaded} tokens)` } }
     const server = await mockServer([
       { body: JSON.stringify({ models: [{ key: model, type: 'llm', max_context_length: 262144,
         loaded_instances: [{ id: model, config: { context_length: 8192 } }] }] }) },
-      { status: 400, body: JSON.stringify({ error: { message: JSON.stringify(body) } }) }, { events: textEvents },
     ])
-    const resize = vi.spyOn(localContext, 'resizeLmStudioContext').mockResolvedValue(recovered)
-    if (preflight) resize.mockResolvedValueOnce(loaded)
+    const resize = vi.spyOn(localContext, 'resizeLmStudioContext')
     const ctx = new Context()
     try {
       await ctx.plugin(LlmRuntime)
       ctx.llm.registerAdapter(['lmstudio'], adapterOf({ lmstudio: { baseURL: server.url + '/v1', api: 'openai-completions',
-        models: [{ id: model, lmStudio: { source: '/api/v1/models', maxContext: 262144 } }],
+        models: [{ id: model, ...imported ? { lmStudio: { source: '/api/v1/models', maxContext: 262144 } } : {} }],
       } }))
-      const result = await assemble(ctx, { provider: 'lmstudio', model, maxTokens: 48, system: 'Keep all instructions.',
-        messages: [createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text }] })],
-        tools: [{ name: 'read', description: 'Read', parameters: { type: 'object', properties: {} } }] })
-      expect(result.finish).toMatchObject({ kind: 'stop' })
-      expect(resize).toHaveBeenCalledTimes(preflight ? 2 : 1)
-      expect(resize.mock.calls.at(-1)?.slice(1, 4)).toEqual([model, prompt + 48, 262144])
-      expect(server.requests).toHaveLength(3)
-      expect(server.requests[2]).toEqual(server.requests[1])
+      const messages = [createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'x'.repeat(47730) }] })]
+      expect(localContext.estimateLmStudioPrompt({ provider: 'lmstudio', model, messages })).toBe(11937)
+      await expect(assemble(ctx, { provider: 'lmstudio', model, messages }))
+        .resolves.toMatchObject({ finish: { kind: 'error', failure: { code: CONTEXT_WINDOW_EXCEEDED_CODE, message: expect.stringContaining('11937 input tokens plus 2048 reply tokens') as string } } })
+      expect(resize).not.toHaveBeenCalled()
+      expect(server.paths).toEqual(['/api/v1/models'])
     } finally { resize.mockRestore(); await ctx.fiber.dispose() }
   })
 

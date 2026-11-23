@@ -291,6 +291,7 @@
     "scripts/client-bundle-purity.spec.ts"
   ],
   "references": [
+    { "path": "./packages/experimental/work-validation" },
     { "path": "./packages/experimental/action-cards" },
     { "path": "./packages/experimental/creation-recommendations" },
     { "path": "./packages/experimental/plugin-recommendations" },
@@ -419,6 +420,7 @@
     { "path": "./packages/experimental/deepseek-chat-import/tsconfig.host.json" },
     { "path": "./packages/session-query/session-log-export/tsconfig.host.json" },
     { "path": "./packages/settings/settings" },
+    { "path": "./packages/experimental/missions" },
     { "path": "./packages/credentials/credentials" },
     { "path": "./packages/credentials/credentials-local" },
     { "path": "./packages/credentials/authorization" },

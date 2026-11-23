@@ -1,0 +1,35 @@
+- id: mission-mock
+  disabled: true
+- id: missions
+  config:
+    enabled: true
+    roles:
+      - name: research
+        provider: mission-worker
+        model: qwen3.8-flash-next
+        tools: [mission_probe]
+    limits:
+      maxTasks: 1
+      maxSteps: 4
+      taskSteps: 4
+      taskSeconds: 90
+      maxOutputTokens: 2048
+      maxResultChars: 4000
+- id: llm-pi-ai
+  config:
+    providers:
+      mission-worker:
+        api: openai-completions
+        baseURL: https://api.axforge.ai/v1
+        apiKeyEnv: MISSIONS_LIVE_KEY
+        timeoutMs: 45000
+        retryPolicy:
+          mode: normal
+          maxRetries: 0
+        models:
+          - id: qwen3.8-flash-next
+            contextWindow: 131072
+            maxTokens: 2048
+- insert:
+    - id: mission-live-coordinator
+      name: './live-coordinator.ts'

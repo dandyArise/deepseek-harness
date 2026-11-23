@@ -31,6 +31,8 @@ kind: "package-reference"
 
 `settings.openSettingsDocument()` 准备提供方持有的文档，并用原生文本编辑器打开；该方法不接受浏览器提供的文件系统目标。
 
+`settings.readGlobalInstructions()` 读取 `$DSH_HOME/AGENTS.md`，不存在时返回空草稿。`settings.saveGlobalInstructions(content, revision)` 检查版本后原子替换固定路径的 UTF-8 Markdown。API 写入串行化，拒绝过期草稿和超过 1 MiB 的内容；不会重启 Host 或强制活动会话重新加载。外部编辑器不共享该队列，最终检查与替换之间仍可能发生文件系统竞争。
+
 -----
 
 <a id="configuration"></a>

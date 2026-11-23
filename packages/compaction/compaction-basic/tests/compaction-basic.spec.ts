@@ -164,6 +164,62 @@ function conversation(turns = 4, text = 'fixture '.repeat(40).trim(), system?: s
   return session
 }
 
+it('packs a loaded-window summary once before a discovery/read continuation', async () => {
+  const requests: GenerateOptions[] = []
+  class LoadedAdapter extends LlmAdapter {
+    override resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
+      return Promise.resolve({ provider, id: model, name: model, context: { contextWindow: 11264 }, defaultMaxTokens: 2048,
+        lmStudio: { source: '/api/v1/models', loadedContext: 11264 } })
+    }
+    override async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+      requests.push(options)
+      const input = options.messages.reduce((sum, message) => sum + 4 + message.content.reduce((tokens, block) =>
+        tokens + (block.type === 'text' ? Math.ceil(block.text.length / 4) + 4 : 0), 0), 0)
+      expect(input + (options.maxTokens ?? 0)).toBeLessThanOrEqual(11264)
+      yield { type: 'text-delta', index: 0, text: 'Earlier work was read-only; await the latest instruction.' }
+      yield { type: 'finish', reason: { kind: 'stop' } }
+    }
+  }
+  const ctx = new Context()
+  await ctx.plugin(LlmRuntime)
+  await ctx.plugin(SessionProjectionRegistry)
+  await ctx.plugin(TokenMeter)
+  ctx.llm.registerAdapter([MODEL], new LoadedAdapter())
+  const engine = new BasicCompactionEngine(ctx, { auto: false })
+  try {
+    const session = conversation(12, 'x'.repeat(1220), 's'.repeat(7960))
+    session.append('request/header', { header: { config: { provider: MODEL, model: MODEL, maxTokens: 2048 } }, reason: 'change' })
+    const current = agent(session, MODEL)
+    await engine.compactIfNeeded(current, 'pressure', SIGNAL)
+    // Newly admitted instructions and the discovery exchange consumed about
+    // 1,500 estimated tokens in the observed read-only turn.
+    const instruction = 'Read README.md without changing files. ' + 'i'.repeat(5900)
+    session.append('user/message', createUserMessage({ source: { kind: 'user' },
+      content: [{ type: 'text', text: instruction }] }), { surfaceOp: 'append' })
+    await engine.compactIfNeeded(current, 'pressure', SIGNAL)
+    expect(requests).toHaveLength(1)
+    expect(session.snapshotEvents().filter(event => event.type === 'compaction/summary').map(event => ({
+      shadowedNodes: event.data.shadowedSeqs.length,
+      maxTokens: event.data.maxTokens,
+      summary: event.data.summary,
+    }))).toMatchInlineSnapshot(`
+      [
+        {
+          "maxTokens": 2816,
+          "shadowedNodes": 19,
+          "summary": [
+            {
+              "text": "Earlier work was read-only; await the latest instruction.",
+              "type": "text",
+            },
+          ],
+        },
+      ]
+    `)
+    expect(session.deriveMessages().some(message => message.content.some(block => block.type === 'text' && block.text === instruction))).toBe(true)
+  } finally { await ctx.fiber.dispose() }
+})
+
 function toolConversation(): Session {
   const session = Session.create(brandString<SessionId>('tools'))
   for (let turn = 1; turn <= 3; turn += 1) {
@@ -769,6 +825,23 @@ describe('pressure measurement and retention', () => {
     expect(result?.shadowedSeqs[0]).toBe(head)
     expect(result?.shadowedSeqs.length).toBeGreaterThan(2)
     expect(session.surface.nodes.length).toBeLessThan(8)
+  })
+
+  it('keeps the latest user instruction verbatim during ordinary loaded-context pressure', async () => {
+    const ctx = createContext(8192)
+    vi.spyOn(ctx.llm, 'resolveModelInfo').mockResolvedValue({
+      provider: MODEL, id: MODEL, name: MODEL,
+      context: { contextWindow: 8192 },
+      lmStudio: { source: '/api/v1/models', loadedContext: 8192 },
+    })
+    const compact = service({ auto: false, thresholdRatio: 0.5, retainTokens: 1, headroomTokens: 128 }, ctx)
+    const session = conversation(4, 'fixture '.repeat(400))
+    const latest = session.snapshotEvents().findLast(event => event.type === 'user/message')!
+    const result = await compactIfNeeded(compact, session, 'pressure')
+    expect(result).not.toBeNull()
+    expect(result?.shadowedSeqs).not.toContain(latest.seq)
+    expect(session.surface.nodes).toContain(latest.seq)
+    expect(compact.calls.map(call => summarizedText(call.input)).join('\n')).not.toContain('user 4')
   })
 
   it('starts the range after a system head and keeps that node at surface position 0', async () => {

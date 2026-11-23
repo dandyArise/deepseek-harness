@@ -1,15 +1,17 @@
 /** Serialized module and profile-configuration reloads. */
 import assert from 'node:assert/strict'
+import { isDeepStrictEqual } from 'node:util'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { watchConfig as watchExactConfig } from './watch-config.ts'
 import { Context, FiberState, Inject, Service, type Fiber, type Plugin } from '@deepseek-ai/cordis'
 import type { Entry, ModuleLoader, ModuleJob, ResolveResult } from '@deepseek-ai/cordis-plugin-loader'
 import type { Include } from '@deepseek-ai/cordis-plugin-include'
+import { parseEntryYaml } from '@deepseek-ai/cordis-plugin-include'
 import { FSWatcher, watch, type ChokidarOptions } from 'chokidar'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
 import {
-  readProfileManifest, readProfilePatches, recomposeProfile, PROFILE_PATCH_FILENAME, type RuntimeResolution,
+  readProfileManifest, readProfilePatches, recomposeProfile, takeStartupPatchLayers, PROFILE_PATCH_FILENAME, type RuntimeResolution,
 } from '@deepseek-ai/dsh-app-boot'
 import type {} from '@deepseek-ai/dsh-cmdline'
 import { handleError } from './error.ts'
@@ -384,18 +386,29 @@ class Hmr extends Service {
       const manifestPath = join(profile.dir, 'package.json')
       const patchFiles = [profile.patchPath, join(profile.home, PROFILE_PATCH_FILENAME)]
       let lastInputs: string | undefined
+      let startup = takeStartupPatchLayers(profile)
       let lastBundles = JSON.stringify(profile.startedBundles)
       const refresh = async (manifestOnly: boolean): Promise<void> => {
         const bundles = JSON.stringify(readProfileManifest('dsh', profile.dir).dsh?.profile?.bundles ?? [])
         if (manifestOnly && bundles === lastBundles) return
-        const inputs = JSON.stringify([bundles, ...patchFiles.map((filename) => {
+        const contents = patchFiles.map((filename) => {
           try { return readFileSync(filename, 'utf8') }
           catch (error) {
             if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
             throw error
           }
-        })])
+        })
+        const inputs = JSON.stringify([bundles, ...contents])
         if (inputs === lastInputs) return
+        // Chokidar emits add for existing files. Compare against the layers consumed by boot,
+        // so a write between composition and watcher registration still triggers a reload.
+        const initial = startup
+        startup = undefined
+        if (initial && bundles === lastBundles && isDeepStrictEqual(initial,
+          contents.map(content => content === null ? [] : parseEntryYaml(content)))) {
+          lastInputs = inputs
+          return
+        }
         const { warnings, pending, restartReason } = await this.reconcileProfile()
         if (restartReason !== undefined) this.ctx.logger.warn('restart required: %s', restartReason)
         if (pending.length > 0) this.ctx.logger.warn('changed modules keep running their previous code until a restart: %o', pending)

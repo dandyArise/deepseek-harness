@@ -29,7 +29,7 @@ pre-commit:
       run: node_modules/.bin/tsx packages/llm/llm-pi-ai/scripts/gen-provider-data.ts --check --cached
 
     - name: vendor manifest guard
-      run: scripts/check-vendor-manifest.sh
+      run: node scripts/check-vendor-manifest.mjs
 
 pre-merge-commit:
   jobs:

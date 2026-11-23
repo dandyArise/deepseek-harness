@@ -5,6 +5,8 @@ kind: "package-reference"
 
 # @deepseek-ai/dsh-llm-pi-ai
 
+The `lmstudio` provider refreshes the native loaded-context metadata before requests even for manually configured models without imported LM Studio metadata. The loaded window, rather than the theoretical catalogue capacity, governs tool and reply budgets.
+
 English | [中文](README.zh.md)
 
 ## Summary
@@ -25,6 +27,8 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
+For imported LM Studio models, leading `<think>` blocks are separated from visible answers, including after tool calls. Fragmented tags are recognized across stream chunks; ordinary quoted examples remain unchanged. Tool-enabled requests retain reasoning as typed blocks and preserve structured tool calls. Tool-free malformed responses use at most one recovery request within the remaining output budget; a closed think block with a final answer needs no recovery request.
+
 Mount this plugin when a composition routes model requests through pi-ai's provider catalogs or through gateways that pi-ai's installed catalog does not describe. The `providers` dictionary is the whole configuration surface: each key is the provider route name a request selects with `GenerateOptions.provider`.
 
 The adapter accepts the LLM service's [request-only user inputs](../llm/README.md#use-this-package) alongside durable history. User identity and attribution do not enter pi-ai content; assistant replay metadata and tool-call correlation remain attached to durable messages.
@@ -38,6 +42,8 @@ Choose this adapter when the same composition serves several providers, when a r
 For LM Studio, **Fetch available models** joins the inference catalog to the native model metadata. In the model selector, **Vision** uses the effective vision capability and **Verified tools** requires a successful round trip for the selected protocol. The model editor shows the source and keeps per-capability overrides across imports. Missing declarations appear as unknown. The native reasoning options can describe effort settings without establishing a separate reasoning channel.
 
 **Verify this model** runs inference on the selected model. Harness supplies a random tracking number only after receiving a structured tool call and checks for that number in the final answer. A protocol or template error records a blocked verdict with the cause. Catalog synchronization only reads metadata. Context budgeting uses the loaded instance length when available and falls back to the advertised maximum for an unloaded model.
+
+LM Studio requests refresh native capacity before preparation. A model key with several loaded aliases uses their smallest capacity; an exact instance id uses its own capacity. Before generation, the adapter estimates the complete prompt, including tool schemas, and reserves the reply cap. An oversized request enters the existing bounded compaction/retry path without an HTTP generation call or automatic model reload. The admitted reply cap replaces pi-ai's fixed 4096-token safety subtraction. Counts remain estimates: provider-confirmed overflow still uses normal recovery, and an indivisible latest instruction or tool catalog may require a larger loaded context.
 
 Each profile may set a `retryPolicy`; omission uses normal mode with five retries. `apiKeyEnv` is a credential reference resolved per request through the harness credential seam, so no secret enters the configuration file; a reference that resolves to nothing fails the request with `MISSING_CREDENTIAL`. Omitting it leaves the route configured-but-keyless, which for an installed catalog route defers to pi-ai's provider-native ambient discovery.
 

@@ -439,6 +439,12 @@ abstract stat(id: SessionId, options?: SessionPersistenceStatOptions): Promise<S
  * @returns one snapshot per stored session.
  */
 abstract list(options?: SessionPersistenceListOptions): Promise<readonly SessionPersistenceSnapshot[]>
+
+/**
+ * Permanently erase this session's durable history after its writer has closed.
+ * @param id - session identity whose stored log must be removed.
+ */
+async delete(id: SessionId): Promise<void>
 ```
 
 Types: [SessionId](core.zh.md)

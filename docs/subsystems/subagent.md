@@ -2,6 +2,8 @@
 
 English | [中文](subagent.zh.md)
 
+`SubagentArchiveState` records archived child IDs, the automatic-archive preference and optional display names. `SubagentArchiveUpdate` selects `archiveCompleted`, `restore`, `setAuto` or `rename`; the [projection types](../../packages/subagent/subagent/src/projection-types.ts) and [archive implementation](../../packages/subagent/subagent/src/popup-archive.ts) define the contract. Bulk archival excludes active children and requires a successful closed turn; restoration changes visibility without rerunning the child.
+
 The unified activation API manages local conversations and external executions. Creation ancestry, runtime ownership, and communication belong to the subagent tree. [Subagent controls](../../packages/subagent/tool-subagent-control/README.md) own agent identity and exact-caller inbox waiting; Team tools add shared tasks and task policy.
 
 ## Capabilities and activation requests
@@ -442,6 +444,14 @@ Named provider registry with managed activations, durable discovery, and local c
 
 ```ts cordis-catalog
 /**
+ * Update parent-owned archive state using the manager's live activity check.
+ * @param parent - session owning the direct-child catalog.
+ * @param update - requested archive, restoration, rename or preference operation.
+ * @returns the resulting archive snapshot.
+ */
+updateArchive(parent: Session, update: SubagentArchiveUpdate): Promise<SubagentArchiveState>
+
+/**
  * Resolve a delegation tool's depth policy against the current user setting.
  * @param configured - Explicit tool limit, or provider-managed for external delegation.
  * @returns The numeric limit, or undefined when the provider owns depth enforcement.
@@ -615,7 +625,7 @@ registerProvider(provider: SubagentProvider): () => void
 getProvider(name: string): SubagentProvider | undefined
 ```
 
-Types: [Agent](core.md) · [ContentBlock](llm-streaming.md) · [MessageId](llm-streaming.md) · [SessionId](core.md)
+Types: [Agent](core.md) · [ContentBlock](llm-streaming.md) · [MessageId](llm-streaming.md) · [Session](session.md) · [SessionId](core.md)
 
 Source: [`packages/subagent/subagent/src/index.ts`](../../packages/subagent/subagent/src/index.ts)
 

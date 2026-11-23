@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Timer from '@deepseek-ai/cordis-plugin-timer'
-import { boot, initProfile, readProfileManifest, readProfilePatches, type ProfileContext } from '@deepseek-ai/dsh-app-boot'
+import { boot, initProfile, loadProfileDirectory, readProfileManifest, readProfilePatches, type ProfileContext } from '@deepseek-ai/dsh-app-boot'
 import { withFileLock } from '@deepseek-ai/dsh-atomic-write'
 import { FSWatcher } from 'chokidar'
 import { expect, it, onTestFinished, vi } from 'vitest'
@@ -40,7 +40,8 @@ async function fixture(beforeWatch?: (profile: ProfileContext) => void) {
   writeFileSync(profile.patchPath, JSON.stringify(rows))
   let commit: (() => void) | undefined
   const start = watchers.length
-  const ctx = await boot('test', join(dir, 'cordis.yml'), readProfilePatches('test', profile), (host) => {
+  const initial = loadProfileDirectory('test', dir, profile.installAnchor)
+  const ctx = await boot('test', join(dir, 'cordis.yml'), readProfilePatches('test', profile, initial), (host) => {
     beforeWatch?.(profile)
     host.provide('profileContext', profile)
     host.provide('appReady', { onReady(listener) { commit = listener; return () => { commit = undefined } } })
@@ -54,6 +55,16 @@ async function fixture(beforeWatch?: (profile: ProfileContext) => void) {
   const drain = () => ctx.hmr.runExclusive(async () => {})
   return { ctx, profile, dir, home, emit, drain, commit: () => commit?.() }
 }
+
+it('skips the initial notification for the patch layers already applied at boot', async () => {
+  const f = await fixture()
+  const reconcile = vi.spyOn(f.ctx.hmr, 'reconcileProfile')
+  f.commit()
+  f.emit(0, f.profile.patchPath)
+  await f.drain()
+  expect(reconcile).not.toHaveBeenCalled()
+  expect(f.ctx.get('profileProbe')).toBe('initial')
+})
 
 it('waits for application readiness and applies profile, home and manifest changes', async () => {
   const f = await fixture()

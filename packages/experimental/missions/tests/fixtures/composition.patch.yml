@@ -1,0 +1,41 @@
+- id: headless-startup
+  disabled: true
+- id: headless-runner
+  disabled: true
+- id: session-title-llm
+  disabled: true
+- id: agent-loop
+  config:
+    agents:
+      - id: main
+        provider: mission-coordinator
+        model: coordinator
+        cwd: !!js process.cwd()
+- id: session-persistence-jsonl
+  config:
+    root: './.sessions'
+    compression: none
+- insert:
+    - id: mission-mock
+      name: './mock.ts'
+    - id: missions
+      name: '../../src/index.ts'
+      config:
+        enabled: true
+        roles:
+          - name: research
+            provider: mission-worker
+            model: worker
+            tools: []
+        limits:
+          maxTasks: 3
+          maxSteps: 6
+          taskSteps: 3
+          taskSeconds: 15
+          maxOutputTokens: 256
+          maxResultChars: 2000
+- id: sandbox-policy
+  inject: []
+  config:
+    mode: read-only
+    workspaceRoot: !!js process.cwd()

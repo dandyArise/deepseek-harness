@@ -71,7 +71,10 @@ export interface IWorkspaces {
    * @param workspaceId - target Workspace.
    */
   delete(workspaceId: WorkspaceId): Promise<void>
-  /** Permanently delete a Session and its history. */
+  /**
+   * Permanently delete a Session and its history.
+   * @param sessionId - session whose conversation tree is to be removed.
+   */
   deleteSession(sessionId: SessionId): Promise<void>
   /**
    * Move a Workspace within the Host registry order.

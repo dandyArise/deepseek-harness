@@ -556,6 +556,8 @@ interface LlmModelBadge {
 ```ts type-equiv
 /** One adapter-discovered model; catalog membership is advisory, not request validation. */
 interface LlmModelInfo {
+  protocol?: string
+  lmStudio?: LmStudioModelMetadata
   /** Provider route that owns this model entry. */
   provider: string
   /** Model id passed to {@link GenerateOptions.model}. */
@@ -789,6 +791,7 @@ interface LlmModelDiscoveryRequest {
  * a surface adopting one of these still owes the capacities its adapter needs.
  */
 interface LlmDiscoveredModel {
+  lmStudio?: LmStudioModelMetadata
   /** Model id the endpoint accepts. */
   id: string
   /** Human-readable name when the endpoint supplies one. */

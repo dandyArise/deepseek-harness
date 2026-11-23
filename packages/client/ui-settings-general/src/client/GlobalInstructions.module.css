@@ -1,0 +1,7 @@
+.editor { display: flex; flex-direction: column; gap: 12px; width: 100%; }
+.editor h2, .editor p { margin: 0; }
+.path { overflow-wrap: anywhere; opacity: .75; }
+.input { width: 100%; min-height: 320px; resize: vertical; box-sizing: border-box; padding: 16px; border: 1px solid currentColor; border-radius: 12px; background: transparent; color: inherit; font: 14px/1.6 monospace; }
+.input:focus-visible { outline: 2px solid #80b8ef; outline-offset: 2px; }
+.actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.editor [role='alert'] { color: #e05252; }

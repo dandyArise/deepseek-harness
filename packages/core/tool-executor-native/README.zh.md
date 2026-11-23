@@ -65,7 +65,7 @@ Agent 步骤使用 [agent-loop 并发配置](../agent-loop/README.zh.md)，循�
 
 #### 模型看到什么
 
-每个可见工具的 `name`、`description` 和 JSON Schema 参数；不会增加提示词章节。
+每个可见工具的 `name`、`description` 和 JSON Schema 参数；不会增加提示词章节。已知模型上下文大小时，原生工具定义最多使用其四分之一。过大的目录先缩短描述并移除 schema 注释，但保留验证约束；仍过大时，通过 `harness_discover_tools` 按每页十二项搜索当前作用域和步骤允许的工具。请求精确名称后，下一步启用该工具并替换上次选择。选择按运行中的 Agent 隔离，重启后重置；原始参数验证和权限策略保持有效。单个 schema 超出预算时返回明确错误。上下文和工具 token 数量是估算值，不是精确 tokenizer 保证。
 
 #### Token 影响
 

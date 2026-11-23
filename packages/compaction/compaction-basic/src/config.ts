@@ -6,6 +6,7 @@
 
 import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import { deepFreeze } from '@deepseek-ai/dsh-util-values'
+import { createRequire } from 'node:module'
 import type {
   BasicCompactionConfig,
   CompactionPolicyConfig,
@@ -18,6 +19,12 @@ import type {
 
 /** Default request-pressure fraction for every routed model. */
 const DEFAULT_THRESHOLD_RATIO = 0.8
+const require = createRequire(import.meta.url)
+// Keep the optional artifact out of the source-only launch path by default.
+const rustPressureThreshold = (...args: Parameters<typeof import('@deepseek-ai/node-addon-system/kernels').rustPressureThreshold>) =>
+  process.env.DANDY_RUST_KERNELS
+    ? (require('@deepseek-ai/node-addon-system/kernels') as typeof import('@deepseek-ai/node-addon-system/kernels')).rustPressureThreshold(...args)
+    : undefined
 
 /** Default verbatim-tail fraction for every routed model. */
 const DEFAULT_RETAIN_RATIO = 0.16
@@ -195,7 +202,8 @@ export function resolveCompactSpec(
       + 'compaction headroomTokens, or configure a larger adapter model contextWindow',
     )
   }
-  const thresholdTokens = Math.floor(Math.min(
+  const thresholdTokens = rustPressureThreshold(contextWindow, reservedCompletionTokens, policy.thresholdRatio,
+    policy.headroomTokens, policy.fixedHeadroom ?? false) ?? Math.floor(Math.min(
     contextWindow * policy.thresholdRatio,
     pressureBudgetTokens,
   ))

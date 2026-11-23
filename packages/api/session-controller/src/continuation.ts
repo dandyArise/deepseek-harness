@@ -17,19 +17,25 @@ const stateSchema = z.object({
   failedAttempt: z.boolean(),
   ending: endingSchema,
   truncated: z.literal(true).optional(),
+  humanTurn: z.boolean(),
+  retryTurn: z.boolean(),
+  lastTextTruncated: z.boolean(),
+  autoContinue: z.boolean(),
 })
 
 /** Recoverable manual-continuation facts over admitted user input and empty retry messages. */
 export type ContinuationState = z.infer<typeof stateSchema>
 
+/** Explicit continuation instruction for an admitted response truncated by its output limit. */
 export const continuationPrompt = 'Continue the previous response in its original language from where it stopped.'
 
-const EMPTY: ContinuationState = { admitted: false, failedAttempt: false, ending: null }
+const EMPTY: ContinuationState = { admitted: false, failedAttempt: false, ending: null,
+  humanTurn: false, retryTurn: false, lastTextTruncated: false, autoContinue: false }
 
 /** Eligibility requires admitted human work and a failed settlement in the last request step. */
 export const continuationProjectionDefinition = {
   key: 'conversationContinuation',
-  stateVersion: 5,
+  stateVersion: 6,
   stateSchema,
   init: (): ContinuationState => EMPTY,
   apply: (state, event) => {
@@ -37,20 +43,35 @@ export const continuationProjectionDefinition = {
       case 'turn/start':
         return EMPTY
       case 'step/start':
-      case 'assistant/message':
         return state.failedAttempt ? { ...state, failedAttempt: false } : state
-      case 'user/message':
-        return !state.admitted && event.surfaceOp === 'append'
+      case 'assistant/message': {
+        const { message, stream, interrupted } = event.data
+        const lastTextTruncated = !interrupted
+          && !message.content.some(block => block.type === 'tool-call')
+          && message.content.some(block => block.type === 'text' && block.text.trim())
+          && stream.some(frame => frame.type === 'chunk' && frame.chunk.type === 'finish' && frame.chunk.reason.kind === 'max-tokens')
+          && !stream.some(frame => frame.type === 'tool-call-chunks' || (frame.type === 'chunk'
+            && frame.chunk.type === 'block-start' && frame.chunk.blockType === 'tool-call'))
+        return !state.failedAttempt && state.lastTextTruncated === lastTextTruncated ? state
+          : { ...state, failedAttempt: false, lastTextTruncated }
+      }
+      case 'user/message': {
+        const humanTurn = state.humanTurn || (event.surfaceOp === 'append' && event.data.source.kind === 'user')
+        const retryTurn = state.retryTurn || event.data.source.kind === 'retry'
+        const admitted = state.admitted || event.surfaceOp === 'append'
           && ((event.data.source.kind === 'user' && event.data.content.length > 0)
             || (event.data.source.kind === 'retry' && (event.data.content.length === 0
               || (event.data.content.length === 1 && event.data.content[0]?.type === 'text'
                 && event.data.content[0].text === continuationPrompt))))
-          ? { ...state, admitted: true } : state
+        return admitted === state.admitted && humanTurn === state.humanTurn && retryTurn === state.retryTurn ? state
+          : { ...state, admitted, humanTurn, retryTurn }
+      }
       case 'assistant/attempt':
         return state.failedAttempt ? state : { ...state, failedAttempt: true }
       case 'turn/end': {
         if (event.data.reason.kind === 'max-tokens' && state.admitted) {
-          return { ...EMPTY, ending: event.seq, truncated: true }
+          return { ...EMPTY, ending: event.seq, truncated: true,
+            autoContinue: state.humanTurn && !state.retryTurn && state.lastTextTruncated }
         }
         const ending = event.data.reason.kind === 'error' && CONTINUABLE_FAILURES.has(event.data.reason.error.code)
           && state.admitted && state.failedAttempt ? event.seq : null

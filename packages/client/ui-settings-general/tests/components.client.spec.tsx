@@ -9,6 +9,8 @@ import { GeneralSection } from '../src/client/GeneralSection.tsx'
 import { CloseLabel, HeaderContent, TriggerContent } from '../src/client/chrome.tsx'
 import type { TriggerContentProps } from '../src/client/chrome.tsx'
 import { SettingsDocumentAction } from '../src/client/SettingsDocumentAction.tsx'
+import { GlobalInstructions } from '../src/client/GlobalInstructions.tsx'
+import { instructionsEnglish } from '../src/client/global-instructions-locale.ts'
 import { DesktopChannelRow, DesktopChannelToast } from '../src/client/DesktopChannelRow.tsx'
 import { DesktopChannelSource } from '../src/client/desktop-channel-source.ts'
 import type { DesktopChannelChangeResult, DesktopChannelState } from '../src/types.ts'
@@ -49,6 +51,32 @@ const kit = {
   ...allowAllAccess,
   useContextMenu: contextMenuHook(),
 }
+
+describe('global instructions editor', () => {
+  const text: Parameters<typeof GlobalInstructions>[0]['t'] = key => (instructionsEnglish as Record<string, string>)[key] ?? key
+  it('loads, saves explicitly and keeps a rejected draft', async () => {
+    const readDocument = vi.fn(async () => ({ content: '# Original', path: '/home/AGENTS.md', revision: 'one' }))
+    const saveDocument = vi.fn(async (content: string) => ({ content, path: '/home/AGENTS.md', revision: 'two' }))
+    render(<GlobalInstructions {...kit} close={() => {}} t={text} readDocument={readDocument} saveDocument={saveDocument} />)
+    const editor = await screen.findByDisplayValue('# Original')
+    fireEvent.change(editor, { target: { value: '# Tests required' } })
+    expect(saveDocument).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByText('Save', { selector: 'button' }))
+    await screen.findByText('Saved')
+    expect(saveDocument).toHaveBeenCalledWith('# Tests required', 'one')
+    saveDocument.mockRejectedValueOnce(new Error('Document changed externally'))
+    fireEvent.change(editor, { target: { value: '# Keep this draft' } })
+    fireEvent.click(screen.getByText('Save', { selector: 'button' }))
+    await screen.findByRole('alert')
+    expect(screen.getByDisplayValue('# Keep this draft')).toBeTruthy()
+    expect(screen.queryByText('Saved')).toBeNull()
+  })
+  it('disables saving after a read failure', async () => {
+    render(<GlobalInstructions {...kit} close={() => {}} t={text} readDocument={async () => { throw new Error('Access denied') }} saveDocument={vi.fn()} />)
+    await screen.findByRole('alert')
+    expect(screen.getByText('Save', { selector: 'button' }).hasAttribute('disabled')).toBe(true)
+  })
+})
 
 describe('Desktop collapsed update badge', () => {
   it('shows update and retry status and yields to connection feedback', () => {

@@ -445,7 +445,11 @@ export class SessionController extends TypertRemoteService {
     return this.commands.rename(request)
   }
 
-  /** Update the direct-child archive owned by the addressed ordinary parent. */
+  /**
+   * Update the direct-child archive owned by the addressed ordinary parent.
+   * @param request - parent session and requested archive operation.
+   * @returns the resulting archive state.
+   */
   @Remote('updateSubagentArchive')
   async updateSubagentArchive(request: SessionSubagentArchiveRequest): Promise<SessionSubagentArchiveValue> {
     const result = await this.agents.resolveAgent(request.sessionId)

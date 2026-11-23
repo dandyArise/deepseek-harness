@@ -17,6 +17,29 @@ function restore(source: unknown, version: 3 | 4 = 4) {
 }
 
 describe('V4 source admission', () => {
+  it.each([undefined, 'snapshot', 'relay', 'notice', 'instructions', 'catalog', 'recall'])(
+    'retains work-validation attribution with form %s in every durable message slot', (form) => {
+      const source = { kind: 'work-validation', ...(form === undefined ? {} : { form }) }
+      const message = event(source).data
+      const rows = [
+        event(source),
+        { type: 'developer/message', seq: 0, time: 1, data: { turn: 1, step: 1, message: { ...message as SessionFormatJsonObject, role: 'developer' } } },
+        { type: 'agent/inbox/spliced', seq: 0, time: 1, data: { inserted: [message] } },
+        { type: 'session/title-llm-request', seq: 0, time: 1, data: { messages: [message] } },
+      ] as SessionFormatEvent[]
+      for (const row of rows) {
+        const original = JSON.stringify(row)
+        assertV4MessageSources(row)
+        const decoder = releasedV4SessionFormatCodec.createDecoder(header, 'strict')
+        const output = new SessionFormatEventCollector()
+        decoder.decodeRow(releasedV4SessionFormatCodec.encodeEvent(row), output)
+        expect(decoder.finish(output)).toBe(0)
+        expect(output.values).toEqual([row])
+        expect(JSON.stringify(row)).toBe(original)
+      }
+    },
+  )
+
   it.each(['constructor', 'toString', '__proto__'])('migrates external producer %s without interpreting inherited object keys', (plugin) => {
     const before = JSON.parse(`{"kind":"plugin","plugin":"${plugin}","__proto__":{"tag":"metadata"},"nested":{"kind":"plugin","plugin":"opaque"}}`) as SessionFormatJsonObject
     const expected = JSON.parse(`{"kind":"plugin:${plugin}","__proto__":{"tag":"metadata"},"nested":{"kind":"plugin","plugin":"opaque"}}`) as SessionFormatJsonObject
