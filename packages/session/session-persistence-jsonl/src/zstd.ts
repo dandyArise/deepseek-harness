@@ -9,11 +9,17 @@ import {
   constants, zstdCompress, zstdDecompress, type ZstdOptions,
 } from 'node:zlib'
 import { promisify } from 'node:util'
-import { rustScanFrames } from '@deepseek-ai/node-addon-system/kernels'
+import { createRequire } from 'node:module'
 import { NodePrivateZstdFrameDecoder } from './zstd-private-decoder.ts'
 import { PublicZstdFrameDecoder } from './zstd-public-decoder.ts'
 
 const ZSTD_MAGIC = 0xFD2FB528
+const require = createRequire(import.meta.url)
+// Source-only launches do not need built optional kernels unless explicitly enabled.
+const rustScanFrames = (...args: Parameters<typeof import('@deepseek-ai/node-addon-system/kernels').rustScanFrames>) =>
+  process.env.DANDY_RUST_KERNELS
+    ? (require('@deepseek-ai/node-addon-system/kernels') as typeof import('@deepseek-ai/node-addon-system/kernels')).rustScanFrames(...args)
+    : undefined
 const zstdCompressAsync = promisify(zstdCompress)
 const zstdDecompressAsync = promisify(zstdDecompress)
 const CHECKSUM_OPTIONS: ZstdOptions = {
