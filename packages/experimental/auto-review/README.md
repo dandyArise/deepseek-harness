@@ -106,7 +106,7 @@ The reviewer uses the latest `request/header.config` provider and model with the
 
 #### Token effect
 
-One additional model request per supported call, without caching, retries, truncation, compaction, or a separate small output budget. An oversized request fails the call with the provider error.
+One additional model request per supported call, without caching, retries, truncation, compaction, or a separate small output budget. Retained facts use compact JSON: indentation is omitted, but every field, string, role and item order is preserved. An oversized request fails the call with the provider error.
 
 #### KV Cache effect
 

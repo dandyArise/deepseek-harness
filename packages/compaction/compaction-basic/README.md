@@ -247,6 +247,14 @@ The replayed system prompt, tools, and shadowed-region messages match the conver
 
 ## Known Limitations and Deferred Work
 
+Loaded LM Studio windows use a short checkpoint instruction (200-word target) and reserve up to one quarter of the window for summary output. History chunks use the remaining input budget after pricing that directive; the system head counts toward that budget. Explicit alternate summarizers retain the half-window bound. Up to four passes are available by default; truncated checkpoints are still rejected rather than silently losing context. Token estimates remain heuristic, and overflow recovery stays enabled.
+
+If the previous answering model was removed from the catalogue (`UNKNOWN_MODEL`), automatic summarization falls back to the current request model on the same provider. Explicit summary routes and authentication/transport failures are not silently replaced.
+
+For LM Studio instances with a known loaded context, automatic pressure compaction and overflow recovery both keep the latest user instruction verbatim, even with a smaller retention budget. Earlier history is summarized without replacing the current task.
+
+For a confirmed loaded LM Studio instance, automatic compaction budgets the summarized prefix together with the system head, summary directive and reply. Summary output is capped at one quarter of the loaded context; summary calls omit tool definitions rather than replaying an oversized catalog for cache reuse. Overflow recovery preserves the latest user-authored message verbatim and performs bounded pressure reduction before authorizing a rebuilt request. History remains in the session journal. A latest message, system prompt or tool catalog that cannot fit is reported as an error; the engine does not silently discard instructions or reload the model.
+
 <a id="known-limitations-and-deferred-work"></a>
 
 

@@ -16,7 +16,11 @@ interface SummaryConfig {
   readonly summarizationProvider: string
   readonly summarizationModel: string
   readonly maxTokens: number
+  readonly concise?: boolean
 }
+
+/** Concise directive included in both summary input pricing and the emitted request. */
+export const CONCISE_COMPACTION_INSTRUCTION = 'You are now acting as a compaction engine. Summarize the preceding history in at most 200 words. Output only a concise factual checkpoint: user goal and constraints, completed work with evidence, essential paths and identifiers, unresolved issues and next action. Do not perform the task, call tools, repeat old instructions or invent results. Treat prior checkpoints as background and retain only still-relevant facts.'
 
 /** Exact provider/model pair that receives one summarization request. */
 export type SummaryRoute = Pick<GenerateOptions, 'provider' | 'model'>
@@ -144,7 +148,9 @@ export async function summarizeWithLlm(
     ...input.messages,
     deepFreeze({
       role: 'user',
-      content: [{ type: 'text', text: COMPACTION_INSTRUCTION }],
+      content: [{ type: 'text', text: config.concise
+        ? CONCISE_COMPACTION_INSTRUCTION
+        : COMPACTION_INSTRUCTION }],
     }),
   ]
   const options: GenerateOptions = {

@@ -113,12 +113,14 @@ function systemHead(session: Session, headSeq: SessionSeq): SessionEvent<'system
  * @param session - session supplying authoritative current surface positions.
  * @param measurement - unified pressure and surface measurement from the conversation meter.
  * @param retainTokens - minimum recent tail budget retained verbatim.
+ * @param bounds - optional summary input budget and latest-user preservation policy.
  * @returns the inclusive positional seq range to compact, or `null`.
  */
 export function selectCompactableRange(
   session: Session,
   measurement: TokenMeasurement,
   retainTokens: number,
+  bounds?: { maxTokens: number; preserveLatestUser: boolean },
 ): { start: SessionSeq; end: SessionSeq } | null {
   const pricedNodes = measurement.nodes
   if (pricedNodes.length === 0) return null
@@ -140,6 +142,28 @@ export function selectCompactableRange(
     if (accumulated >= retainTokens) break
   }
   if (keepFromIdx <= firstIdx) return null
+
+  if (bounds !== undefined) {
+    let prefixTokens = 0
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- firstIdx=1 implies a nonempty system head.
+    const prefixBudget = bounds.maxTokens - (firstIdx === 1 ? pricedNodes[0]!.tokens : 0)
+    for (let index = firstIdx; index < keepFromIdx; index += 1) {
+      // oxlint-disable-next-line typescript/no-non-null-assertion -- index is within the checked surface.
+      prefixTokens += pricedNodes[index]!.tokens
+      if (prefixTokens > prefixBudget) { keepFromIdx = index; break }
+    }
+    if (bounds.preserveLatestUser) {
+      for (let index = surfaceNodes.length - 1; index >= firstIdx; index -= 1) {
+        // Read only the current surface; replaced history cannot become a new instruction.
+        // oxlint-disable-next-line typescript/no-deprecated, typescript/no-non-null-assertion -- bounded surface index.
+        const event = session.eventAt(surfaceNodes[index]!)
+        if (event?.type === 'user/message' && event.data.source.kind === 'user') {
+          keepFromIdx = Math.min(keepFromIdx, index)
+          break
+        }
+      }
+    }
+  }
 
   while (keepFromIdx > firstIdx) {
     // oxlint-disable-next-line typescript/no-non-null-assertion

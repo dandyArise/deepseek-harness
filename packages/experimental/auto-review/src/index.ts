@@ -153,8 +153,8 @@ export const name = 'experimental-auto-review'
 export const inject = ['approval', 'llm', 'permissionPresets', 'sessions', 'tools', 'workingDirectory']
 
 /** Return JSON text for one immutable logged value. */
-function json(value: unknown): string {
-  const rendered = JSON.stringify(value, null, 2) as string | undefined
+function json(value: unknown, compact = false): string {
+  const rendered = JSON.stringify(value, null, compact ? undefined : 2) as string | undefined
   /* v8 ignore next -- accepted Session facts and frozen review snapshots are lossless JSON by contract. */
   if (rendered === undefined) throw new Error('auto-review: a required value is not JSON-serializable')
   return rendered
@@ -583,8 +583,9 @@ function snapshotAutoReview(
  */
 function reviewMessages(snapshot: ReviewSnapshot): RequestMessage[] {
   return [
-    `ENVIRONMENT\n${json({ cwd: snapshot.cwd })}`,
-    ...snapshot.history.map(entry => json(entry)),
+    `ENVIRONMENT\n${json({ cwd: snapshot.cwd }, true)}`,
+    // Only compact the envelope; nested argument strings keep their exact bytes.
+    ...snapshot.history.map(entry => json(entry, true)),
   ].map(text => ({ role: 'user', content: [{ type: 'text', text }] }))
 }
 
